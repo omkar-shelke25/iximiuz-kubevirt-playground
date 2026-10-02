@@ -170,6 +170,15 @@ COPY --from=tools /opt/fastfetch/ /usr/local/
 COPY --from=kubevirt /out/bin/virtctl /usr/local/bin/virtctl
 COPY --from=kubevirt /out/kubevirt-version /etc/kubevirt-version
 
+# Browser VNC: noVNC + websockify from Ubuntu, and vm-vnc to connect them to
+# `virtctl vnc --proxy-only`. Run `vm-vnc <vm>`, then open port 6080.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends novnc websockify \
+    && rm -rf /var/lib/apt/lists/*
+COPY vnc/vm-vnc /usr/local/bin/vm-vnc
+COPY vnc/index.html /usr/share/novnc/index.html
+RUN chmod 0755 /usr/local/bin/vm-vnc && websockify --help >/dev/null && test -f /usr/share/novnc/vnc.html
+
 # K3s applies every file in this folder at boot, in file name order,
 # and retries until each one succeeds.
 COPY --from=kubevirt /out/manifests/ /var/lib/rancher/k3s/server/manifests/
@@ -247,6 +256,15 @@ COPY --from=tools /opt/tools/bin/ /usr/local/bin/
 COPY --from=tools /opt/fastfetch/ /usr/local/
 COPY --from=kubevirt /out/bin/virtctl /usr/local/bin/virtctl
 COPY --from=kubevirt /out/kubevirt-version /etc/kubevirt-version
+
+# Browser VNC: noVNC + websockify from Ubuntu, and vm-vnc to connect them to
+# `virtctl vnc --proxy-only`. Run `vm-vnc <vm>`, then open port 6080.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends novnc websockify \
+    && rm -rf /var/lib/apt/lists/*
+COPY vnc/vm-vnc /usr/local/bin/vm-vnc
+COPY vnc/index.html /usr/share/novnc/index.html
+RUN chmod 0755 /usr/local/bin/vm-vnc && websockify --help >/dev/null && test -f /usr/share/novnc/vnc.html
 
 RUN --mount=type=bind,source=terminal,target=/tmp/terminal \
     LAB_USER=${LAB_USER} bash /tmp/terminal/setup.sh
