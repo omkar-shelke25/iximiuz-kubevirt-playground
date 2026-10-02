@@ -1,0 +1,24 @@
+# CDI (Containerized Data Importer) configuration for an iximiuz Labs playground.
+#
+# - infra.nodeSelector: keep CDI's own pods (apiserver, controller, uploadproxy)
+#   on the K3s server, where their images are preloaded. The worker nodes stay
+#   free for VMs.
+# - workload.nodeSelector: importer and cloner pods run wherever the disk is needed.
+# - HonorWaitForFirstConsumer: a disk is created on the node that runs the VM,
+#   which K3s' local-path StorageClass requires.
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: CDI
+metadata:
+  name: cdi
+spec:
+  config:
+    featureGates:
+    - HonorWaitForFirstConsumer
+  imagePullPolicy: IfNotPresent
+  infra:
+    nodeSelector:
+      kubernetes.io/os: linux
+      node-role.kubernetes.io/control-plane: "true"
+  workload:
+    nodeSelector:
+      kubernetes.io/os: linux
