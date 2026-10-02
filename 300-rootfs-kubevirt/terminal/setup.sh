@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Catppuccin Mocha terminal setup, shared by all three rootfs targets
-# (cplane, node, dev-machine). Same layout as the Rust and OpenTofu playgrounds.
+# Tokyo Night terminal setup, shared by all three rootfs targets
+# (cplane, node, dev-machine). Same layout as the Rust and OpenTofu playgrounds,
+# with the Tokyo Night (night) palette instead of Catppuccin Mocha.
 #
 # Runs at image build time as root. Expects the terminal tool binaries
 # (starship, eza, bat, fd, zoxide, delta, atuin, lazygit, fastfetch) to be
@@ -34,65 +35,56 @@ if command -v virtctl >/dev/null 2>&1; then
   virtctl completion bash > /etc/bash_completion.d/virtctl
 fi
 
-# ─── Prompt themes: Catppuccin Mocha ──────────────────────────────────────────
+# ─── Prompt themes: Tokyo Night ───────────────────────────────────────────────
 # starship.toml uses Nerd Font glyphs and powerline arrows (`icons on`).
 # starship-plain.toml uses colored blocks only, the default for browser tabs.
 cat > /etc/starship.toml <<'TOML'
 "$schema" = 'https://starship.rs/config-schema.json'
 
 format = """
-[\ue0b6](red)\
+[\ue0b6](blue)\
 $os\
 $hostname\
-[\ue0b0](bg:peach fg:red)\
+[\ue0b0](bg:magenta fg:blue)\
 ${env_var.PWD}\
-[\ue0b0](bg:yellow fg:peach)\
+[\ue0b0](bg:green fg:magenta)\
 $git_branch\
 $git_status\
-[\ue0b0](fg:yellow bg:sapphire)\
+[\ue0b0](fg:green bg:cyan)\
 $kubernetes\
-[\ue0b0](fg:sapphire bg:lavender)\
+[\ue0b0](fg:cyan bg:terminal_black)\
 $time\
-[\ue0b4 ](fg:lavender)\
+[\ue0b4 ](fg:terminal_black)\
 $cmd_duration\
 $jobs\
 $line_break\
 $status\
 $character"""
 
-palette = 'catppuccin_mocha'
+palette = 'tokyo_night'
 
-[palettes.catppuccin_mocha]
-rosewater = "#f5e0dc"
-flamingo = "#f2cdcd"
-pink = "#f5c2e7"
-mauve = "#cba6f7"
-red = "#f38ba8"
-maroon = "#eba0ac"
-peach = "#fab387"
-yellow = "#f9e2af"
-green = "#a6e3a1"
-teal = "#94e2d5"
-sky = "#89dceb"
-sapphire = "#74c7ec"
-blue = "#89b4fa"
-lavender = "#b4befe"
-text = "#cdd6f4"
-subtext1 = "#bac2de"
-subtext0 = "#a6adc8"
-overlay2 = "#9399b2"
-overlay1 = "#7f849c"
-overlay0 = "#6c7086"
-surface2 = "#585b70"
-surface1 = "#45475a"
-surface0 = "#313244"
-base = "#1e1e2e"
-mantle = "#181825"
-crust = "#11111b"
+[palettes.tokyo_night]
+bg = "#1a1b26"
+bg_dark = "#16161e"
+bg_highlight = "#292e42"
+terminal_black = "#414868"
+fg = "#c0caf5"
+fg_dark = "#a9b1d6"
+comment = "#565f89"
+blue = "#7aa2f7"
+cyan = "#7dcfff"
+blue1 = "#2ac3de"
+magenta = "#bb9af7"
+purple = "#9d7cd8"
+orange = "#ff9e64"
+yellow = "#e0af68"
+green = "#9ece6a"
+teal = "#1abc9c"
+red = "#f7768e"
 
 [os]
 disabled = false
-style = "bg:red fg:crust"
+style = "bg:blue fg:bg_dark"
 format = "[$symbol ]($style)"
 
 [os.symbols]
@@ -101,34 +93,34 @@ Linux = "\U000f033d"
 
 [hostname]
 ssh_only = false
-style = "bg:red fg:crust"
+style = "bg:blue fg:bg_dark"
 format = "[$hostname ]($style)"
 
 [env_var.PWD]
 variable = "PWD"
-style = "bg:peach fg:crust"
+style = "bg:magenta fg:bg_dark"
 format = "[ \uf07c $env_value ]($style)"
 
 [git_branch]
 symbol = "\uf418"
-style = "bg:yellow"
-format = "[[ $symbol $branch ](fg:crust bg:yellow)]($style)"
+style = "bg:green"
+format = "[[ $symbol $branch ](fg:bg_dark bg:green)]($style)"
 
 [git_status]
-style = "bg:yellow"
-format = "[[($all_status$ahead_behind )](fg:crust bg:yellow)]($style)"
+style = "bg:green"
+format = "[[($all_status$ahead_behind )](fg:bg_dark bg:green)]($style)"
 
 [kubernetes]
 disabled = false
 symbol = "\U000f10fe"
-style = "bg:sapphire"
-format = "[[ $symbol $context( \\($namespace\\)) ](fg:crust bg:sapphire)]($style)"
+style = "bg:cyan"
+format = "[[ $symbol $context( \\($namespace\\)) ](fg:bg_dark bg:cyan)]($style)"
 
 [time]
 disabled = false
 time_format = "%H:%M"
-style = "bg:lavender"
-format = "[[ \uf017 $time ](fg:crust bg:lavender)]($style)"
+style = "bg:terminal_black"
+format = "[[ \uf017 $time ](fg:fg bg:terminal_black)]($style)"
 
 [cmd_duration]
 min_time = 2000
@@ -155,52 +147,52 @@ format = "$hostname${env_var.PWD}$git_branch$git_status$kubernetes$time$cmd_dura
 
 [hostname]
 ssh_only = false
-style = "bg:#f38ba8 fg:#11111b"
+style = "bg:#7aa2f7 fg:#16161e"
 format = "[ $hostname ]($style)"
 
 [env_var.PWD]
 variable = "PWD"
-style = "bg:#fab387 fg:#11111b"
+style = "bg:#bb9af7 fg:#16161e"
 format = "[ $env_value ]($style)"
 
 [git_branch]
 symbol = "git:"
-style = "bg:#f9e2af fg:#11111b"
+style = "bg:#9ece6a fg:#16161e"
 format = "[ $symbol$branch ]($style)"
 
 [git_status]
-style = "bg:#f9e2af fg:#11111b"
+style = "bg:#9ece6a fg:#16161e"
 format = "([$all_status$ahead_behind ]($style))"
 
 [kubernetes]
 disabled = false
 symbol = "k8s:"
-style = "bg:#74c7ec fg:#11111b"
+style = "bg:#7dcfff fg:#16161e"
 format = "[ $symbol$context( \\($namespace\\)) ]($style)"
 
 [time]
 disabled = false
 time_format = "%H:%M"
-style = "bg:#b4befe fg:#11111b"
+style = "bg:#414868 fg:#c0caf5"
 format = "[ $time ]($style)"
 
 [cmd_duration]
 min_time = 2000
-style = "fg:#f9e2af"
+style = "fg:#e0af68"
 format = " [took $duration]($style)"
 
 [jobs]
 symbol = "bg:"
-style = "fg:#89b4fa"
+style = "fg:#7aa2f7"
 
 [status]
 disabled = false
-style = "bold fg:#f38ba8"
+style = "bold fg:#f7768e"
 format = "[$status ]($style)"
 
 [character]
-success_symbol = "[>](bold fg:#a6e3a1)"
-error_symbol = "[>](bold fg:#f38ba8)"
+success_symbol = "[>](bold fg:#9ece6a)"
+error_symbol = "[>](bold fg:#f7768e)"
 TOML
 
 mkdir -p /etc/fastfetch
@@ -217,6 +209,7 @@ cat > /etc/fastfetch/config.jsonc <<'JSON'
     { "type": "command", "key": "Docker", "text": "docker --version 2>/dev/null | cut -d' ' -f3 | tr -d , | grep . || echo not installed" },
     { "type": "command", "key": "KubeVirt", "text": "cat /etc/kubevirt-version 2>/dev/null || echo not set" },
     { "type": "command", "key": "KubeVirt phase", "text": "timeout 3 kubectl -n kubevirt get kubevirt kubevirt -o jsonpath={.status.phase} 2>/dev/null | grep . || echo unavailable here" },
+    { "type": "command", "key": "CDI phase", "text": "timeout 3 kubectl get cdi cdi -o jsonpath={.status.phase} 2>/dev/null | grep . || echo unavailable here" },
     { "type": "command", "key": "VMs running", "text": "timeout 3 kubectl get vmi -A --no-headers 2>/dev/null | wc -l" },
     "break", "colors"
   ]
@@ -230,21 +223,24 @@ set -g mouse on
 set -g history-limit 50000
 set -g base-index 1
 setw -g pane-base-index 1
-set -g status-style "bg=#313244,fg=#cdd6f4"
-set -g status-left "#[bold,fg=#11111b,bg=#74c7ec] #S "
-set -g status-right "#[fg=#11111b,bg=#b4befe] %H:%M "
+set -g status-style "bg=#1a1b26,fg=#c0caf5"
+set -g status-left "#[bold,fg=#16161e,bg=#7aa2f7] #S "
+set -g status-right "#[fg=#c0caf5,bg=#414868] %H:%M "
+set -g pane-border-style "fg=#414868"
+set -g pane-active-border-style "fg=#7aa2f7"
+set -g message-style "bg=#292e42,fg=#7dcfff"
 TMUX
 
 git config --system core.pager delta
 git config --system interactive.diffFilter "delta --color-only"
 git config --system delta.navigate true
 git config --system delta.line-numbers true
-git config --system delta.syntax-theme "Catppuccin Mocha"
+git config --system delta.syntax-theme "Tokyo Night"
 git config --system merge.conflictStyle zdiff3
 
 # ─── Shared env, sourced by bash and zsh ──────────────────────────────────────
 cat > /etc/profile.d/kubevirt-shell.sh <<'PROFILE'
-export BAT_THEME="Catppuccin Mocha"
+export BAT_THEME="Tokyo Night"
 export MANPAGER="sh -c 'col -bx | bat -l man -p'"
 
 # Bash fallback: plain prompt and the basics. zsh is the default shell.
@@ -306,7 +302,7 @@ alias k='kubectl'
 export FZF_DEFAULT_COMMAND='fd --type f --hidden --exclude .git'
 export FZF_CTRL_T_COMMAND=$FZF_DEFAULT_COMMAND
 export FZF_ALT_C_COMMAND='fd --type d --hidden --exclude .git'
-export FZF_DEFAULT_OPTS='--height 50% --layout=reverse --border=rounded --info=inline --color=bg+:#313244,spinner:#f5e0dc,hl:#f38ba8,fg:#cdd6f4,header:#f38ba8,info:#cba6f7,pointer:#f5e0dc,marker:#b4befe,fg+:#cdd6f4,prompt:#cba6f7,hl+:#f38ba8,selected-bg:#45475a,border:#6c7086,label:#cdd6f4'
+export FZF_DEFAULT_OPTS='--height 50% --layout=reverse --border=rounded --info=inline --color=fg:#c0caf5,hl:#ff9e64,fg+:#c0caf5,bg+:#292e42,hl+:#ff9e64,info:#7aa2f7,prompt:#7dcfff,pointer:#7dcfff,marker:#9ece6a,spinner:#9ece6a,header:#9ece6a,border:#27a1b9,label:#c0caf5'
 export FZF_CTRL_T_OPTS="--preview 'bat --color=always --style=numbers --line-range=:200 {}'"
 if [[ -f ~/.fzf.zsh ]]; then
   source ~/.fzf.zsh
@@ -367,7 +363,7 @@ ZSH
 cat > /etc/zsh/playground-plugins.zsh <<'ZSH'
 # Loaded last: syntax highlighting must come after every other widget.
 source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
-ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=#6c7086'
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=#565f89'
 ZSH_AUTOSUGGEST_STRATEGY=(history completion)
 source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 ZSH
@@ -398,6 +394,8 @@ usermod -s /usr/bin/zsh "${LAB_USER}"
 for tool in starship eza bat fd zoxide delta atuin lazygit fastfetch zsh; do
   "$tool" --version >/dev/null
 done
+bat --list-themes | grep -qx "Tokyo Night"
+su - "${LAB_USER}" -c 'bat --list-themes' | grep -qx "Tokyo Night"
 zsh -ic 'exit'
 rm -f /root/.zcompdump*
 echo "terminal setup done"
