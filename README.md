@@ -1,13 +1,13 @@
 # iximiuz-kubevirt-playground
 
-Custom [iximiuz Labs](https://labs.iximiuz.com) rootfs images for a multi-node K3s cluster with KubeVirt preinstalled, ready to run virtual machines as soon as the playground starts.
+Custom [iximiuz Labs](https://labs.iximiuz.com) rootfs images for a multi-node K3s cluster with KubeVirt, CDI, and the KubeVirt Manager web UI preinstalled, ready to run virtual machines as soon as the playground starts.
 
 The layout matches the official iximiuz `k3s` playground: one dev machine with Docker, one control plane node, and two worker nodes.
 
 | Machine | IP | Image | Role |
 |---|---|---|---|
 | `dev-machine` | 172.16.0.5 | `ghcr.io/omkar-shelke25/kubevirt-playground:dev-machine` | Docker, kubectl, virtctl, helm, k9s, code-server. No K3s. |
-| `cplane-01` | 172.16.0.2 | `ghcr.io/omkar-shelke25/kubevirt-playground:cplane` | K3s server, KubeVirt control plane, can also run VMs |
+| `cplane-01` | 172.16.0.2 | `ghcr.io/omkar-shelke25/kubevirt-playground:cplane` | K3s server, KubeVirt and CDI control plane, KubeVirt Manager UI, can also run VMs |
 | `node-01` | 172.16.0.3 | `ghcr.io/omkar-shelke25/kubevirt-playground:node` | K3s agent, runs VMs |
 | `node-02` | 172.16.0.4 | `ghcr.io/omkar-shelke25/kubevirt-playground:node` | K3s agent, runs VMs |
 
@@ -22,10 +22,11 @@ The layout matches the official iximiuz `k3s` playground: one dev machine with D
     ├── Dockerfile                    # one file, three targets: cplane, node, dev-machine
     ├── manifest.yaml                 # iximiuz Labs playground manifest (4 machines)
     ├── terminal/
-    │   └── setup.sh                  # Catppuccin Mocha terminal, run in every target
+    │   └── setup.sh                  # Tokyo Night terminal, run in every target
     ├── kubevirt/
     │   ├── 20-kubevirt-cr.yaml       # KubeVirt CR: emulation on, 1 replica
-    │   ├── preload-images.sh         # pulls KubeVirt images per node role
+    │   ├── 40-cdi-cr.yaml            # CDI CR: infra pinned to the K3s server
+    │   ├── preload-images.sh         # pulls images per node role
     │   ├── selinuxfs-unmount.sh      # SELinux workaround (see below)
     │   └── selinuxfs-unmount.service # runs the workaround before K3s starts
     └── dev-machine/
@@ -48,28 +49,54 @@ Two helper stages run once and feed all three targets:
 | Stage | Produces |
 |---|---|
 | `tools` | Terminal binaries from GitHub releases |
-| `kubevirt` | `virtctl`, the KubeVirt manifests, and preloaded image tarballs |
+| `kubevirt` | `virtctl`, the KubeVirt, CDI, and KubeVirt Manager manifests, and preloaded image tarballs |
 
 What each target adds on top of its base:
 
 | | `cplane` | `node` | `dev-machine` |
 |---|---|---|---|
-| KubeVirt manifests in `/var/lib/rancher/k3s/server/manifests/` | Yes | | |
-| Preloaded KubeVirt images | 6 (see below) | 3 | |
+| KubeVirt, CDI, and KubeVirt Manager manifests in `/var/lib/rancher/k3s/server/manifests/` | Yes | | |
+| Preloaded images | 13 (see below) | 4 | |
 | `selinuxfs-unmount.service` | Before `k3s.service` | Before `k3s-agent.service` | |
 | `virtctl` | Yes | | Yes |
-| Catppuccin Mocha terminal | Yes | Yes | Yes |
+| Tokyo Night terminal | Yes | Yes | Yes |
 | code-server theme and Kubernetes extensions | | | Yes |
 | `~/testvm.yaml` and welcome banner | | | Yes |
 
-### KubeVirt install at boot
+### Install at boot
 
-K3s applies every YAML file in `/var/lib/rancher/k3s/server/manifests/` when the server starts, in file name order, and keeps retrying until each one succeeds. The `cplane` image puts two files there:
+K3s applies every YAML file in `/var/lib/rancher/k3s/server/manifests/` when the server starts, in file name order, and keeps retrying until each one succeeds. The `cplane` image puts five files there:
 
-| File | Content |
+| File | Source | Changes from upstream |
+|---|---|---|
+| `10-kubevirt-operator.yaml` | KubeVirt `v1.9.0` release | `virt-operator` at 1 replica |
+| `20-kubevirt-cr.yaml` | This repo | `useEmulation: true`, `infra.replicas: 1` |
+| `30-cdi-operator.yaml` | CDI `v1.66.1` release | `cdi-operator` pinned to the K3s server |
+| `40-cdi-cr.yaml` | This repo | CDI infra pods pinned to the K3s server, `HonorWaitForFirstConsumer` on |
+| `50-kubevirt-manager.yaml` | KubeVirt Manager `v1.5.4` `bundled.yaml` | Pinned to the K3s server, Service as NodePort `30080`, image `:1.5.4` instead of `:nightly` |
+
+The pinning keeps every infra pod on `cplane-01`, where its image is preloaded, and leaves the worker nodes free for VMs.
+
+> [!NOTE]
+> If the `kubevirtmanager/kubevirt-manager:<version>` tag doesn't exist on Docker Hub at build time, the build prints a warning and keeps upstream's `:nightly` image.
+
+### CDI and storage
+
+CDI imports VM disk images into PersistentVolumeClaims, so VMs can have disks that survive a restart. It uses K3s' built-in `local-path` StorageClass, which is the default.
+
+| Point | Detail |
 |---|---|
-| `10-kubevirt-operator.yaml` | Upstream `kubevirt-operator.yaml`, with `virt-operator` at 1 replica |
-| `20-kubevirt-cr.yaml` | KubeVirt CR with `useEmulation: true` and `infra.replicas: 1` |
+| Where disks live | On the node's own disk, under `/var/lib/rancher/k3s/storage/` |
+| When a disk is created | When the VM is scheduled, on that VM's node (`WaitForFirstConsumer`) |
+| Live migration | Not possible, because the disk is local to one node |
+| Disk resize | Not supported by `local-path`, so KubeVirt Manager's resize option won't work |
+
+### KubeVirt Manager
+
+The web UI opens in the playground's **KubeVirt Manager** tab, which points at NodePort `30080` on `cplane-01`. It lists VMs, starts and stops them, and opens a VNC console in the browser.
+
+> [!WARNING]
+> KubeVirt Manager has no login, and its ClusterRole can manage resources across the whole cluster. Anyone with the tab's link controls your VMs. Keep the playground's access set to `owner`, which is the default in `manifest.yaml`.
 
 The upstream operator places `virt-operator`, `virt-api`, and `virt-controller` on control plane nodes. That works unchanged here, because `cplane-01` is a real K3s server with the `node-role.kubernetes.io/control-plane` label. `virt-handler` runs on all three nodes, so VMs can land on any of them.
 
@@ -82,8 +109,11 @@ K3s imports every image tarball in `/var/lib/rancher/k3s/agent/images/` at boot.
 | `virt-operator`, `virt-api`, `virt-controller`, `virt-exportproxy` | Yes | |
 | `virt-handler`, `virt-launcher` | Yes | Yes |
 | `cirros-container-disk-demo` (disk for `~/testvm.yaml`) | Yes | Yes |
+| `cdi-operator`, `cdi-apiserver`, `cdi-controller`, `cdi-uploadproxy` | Yes | |
+| `cdi-importer` | Yes | Yes |
+| `kubevirt-manager` | Yes | |
 
-All are `quay.io/kubevirt/<name>:<KUBEVIRT_VERSION>`. If one can't be pulled at build time, the build prints a warning and carries on, and that image is pulled at runtime instead.
+KubeVirt and CDI images come from `quay.io/kubevirt`, and KubeVirt Manager from `docker.io/kubevirtmanager`. If one can't be pulled at build time, the build prints a warning and carries on, and that image is pulled at runtime instead.
 
 ## Why KubeVirt needs these changes on iximiuz Labs
 
@@ -107,13 +137,13 @@ could not retrieve pid 22479 selinux label: getxattr /proc/22479/attr/current: o
 
 ## Terminal
 
-Every machine gets the same Catppuccin Mocha terminal as the Rust and OpenTofu playgrounds, from `terminal/setup.sh`. zsh is the default shell for `laborant` and `root`, and bash still works with a plain starship prompt.
+Every machine gets the same terminal layout as the Rust and OpenTofu playgrounds, with the **Tokyo Night** theme, from `terminal/setup.sh`. zsh is the default shell for `laborant` and `root`, and bash still works with a plain starship prompt.
 
 | Tool | Version | Purpose |
 |---|---|---|
 | starship | 1.26.0 | Prompt: host, folder, git, **Kubernetes context (namespace)**, time, command duration, exit status |
 | eza | 0.23.5 | `ls`, `ll`, `tree` |
-| bat | 0.26.1 | `cat` with syntax highlighting, also used for man pages |
+| bat | 0.26.1 | `cat` with syntax highlighting (built-in `Tokyo Night` theme), also used for man pages and `git diff` |
 | fd | 10.5.0 | File search, used by fzf |
 | zoxide | 0.10.0 | `z <folder>` jumps to frequent folders |
 | atuin | 18.22.0 | `Ctrl+R` history search |
@@ -121,7 +151,7 @@ Every machine gets the same Catppuccin Mocha terminal as the Rust and OpenTofu p
 | lazygit | 0.65.1 | `lg` |
 | fastfetch | 2.68.1 | System info at login: K3s and Docker versions, KubeVirt version and phase, running VM count |
 | zsh-autosuggestions, zsh-syntax-highlighting | Ubuntu packages | Suggestions and highlighting while typing |
-| tmux | Ubuntu package | Catppuccin status bar |
+| tmux | Ubuntu package | Tokyo Night status bar |
 
 Shell completion is set up for whichever of `kubectl` (and `k`), `helm`, `virtctl`, `crane`, and `docker` the machine has.
 
@@ -150,6 +180,9 @@ Build arguments:
 | Argument | Default | Effect |
 |---|---|---|
 | `KUBEVIRT_VERSION` | `v1.9.0` | KubeVirt, virtctl, and preloaded image version |
+| `CDI_VERSION` | `v1.66.1` | CDI version |
+| `KUBEVIRT_MANAGER_VERSION` | `1.5.4` | KubeVirt Manager manifest and image version |
+| `KUBEVIRT_MANAGER_NODEPORT` | `30080` | NodePort for the web UI. Change the tab in `manifest.yaml` to match. |
 | `PRELOAD_IMAGES` | `true` | `false` skips image preloading. Images get much smaller, but the first boot waits on downloads. |
 | `STARSHIP_VERSION`, `EZA_VERSION`, `BAT_VERSION`, `FD_VERSION`, `ZOXIDE_VERSION`, `DELTA_VERSION`, `ATUIN_VERSION`, `LAZYGIT_VERSION`, `FASTFETCH_VERSION` | See the Terminal table | Terminal tool versions |
 | `CPLANE_BASE`, `NODE_BASE`, `DEV_BASE`, `BUILDER_BASE` | Official iximiuz rootfs images | Base images, for example to pin a specific iximiuz release |
@@ -179,12 +212,14 @@ labctl playground create kubevirt-k3s --base flexbox -f 300-rootfs-kubevirt/mani
 labctl playground start kubevirt-k3s-1a2b3c4d --open
 ```
 
-Two init tasks run on `dev-machine` before the playground opens:
+Four init tasks run on `dev-machine` before the playground opens. The last three wait for `init_wait_nodes` and then run in parallel:
 
 | Task | Waits until |
 |---|---|
 | `init_wait_nodes` | All 3 K3s nodes are `Ready` |
 | `init_wait_kubevirt` | KubeVirt is `Available` |
+| `init_wait_cdi` | CDI is `Available` |
+| `init_wait_kubevirt_manager` | The KubeVirt Manager Deployment is rolled out |
 
 | Machine | CPU / RAM | Disk |
 |---|---|---|
@@ -209,7 +244,7 @@ kubectl get nodes
 kubectl -n kubevirt get pods -o wide
 ```
 
-`virt-operator`, `virt-api`, and `virt-controller` run on `cplane-01`, and there is one `virt-handler` on each node.
+`virt-operator`, `virt-api`, and `virt-controller` run on `cplane-01`, and there is one `virt-handler` on each node. Check CDI and the web UI the same way with `kubectl -n cdi get pods -o wide` and `kubectl -n kubevirt-manager get pods -o wide`: both run on `cplane-01`.
 
 Start the test VM and check which node it runs on:
 
@@ -235,6 +270,20 @@ virtctl console testvm
 
 Log in as `cirros` with password `gocubsgo`. Press `Ctrl+]` to leave.
 
+Check CDI and the default StorageClass:
+
+```bash
+kubectl get cdi cdi
+```
+
+```bash
+kubectl get storageclass
+```
+
+`local-path` is marked `(default)`.
+
+Open the **KubeVirt Manager** tab. `testvm` is listed, and its VNC console opens in the browser.
+
 On `cplane-01`, `node-01`, or `node-02`, check the SELinux workaround:
 
 ```bash
@@ -254,10 +303,14 @@ You should see `selinuxfs unmounted (no SELinux policy loaded)`.
 | VM crashes a few seconds after start | On that VM's node: `systemctl status selinuxfs-unmount` and `grep selinuxfs /proc/mounts`. If still mounted, run `sudo umount /sys/fs/selinux`. |
 | VM stuck `Pending` with `Insufficient devices.kubevirt.io/kvm` | Emulation is off. `kubectl -n kubevirt get kubevirt kubevirt -o yaml \| grep useEmulation` |
 | Images pulled at runtime despite preloading | Check the build log for `WARNING: could not preload` |
+| Playground start times out on `init_wait_cdi` | `kubectl -n cdi get pods -o wide`. CDI pods are pinned to `cplane-01`, so a full `cplane-01` blocks them. |
+| KubeVirt Manager tab shows an error | `kubectl -n kubevirt-manager get pods,svc`. The Service must be NodePort `30080`. |
+| KubeVirt Manager says `CDI (Containerized Data Importer) not found!` | CDI isn't `Available` yet. `kubectl get cdi cdi` |
+| A DataVolume stays `Pending` | `local-path` creates the disk only once a VM using it is scheduled. Start the VM. |
 
 > [!NOTE]
 > K3s owns the objects it applies from its manifests folder. If you change the KubeVirt CR with `kubectl`, K3s may restore the file's version on its next restart. To change it permanently, edit `kubevirt/20-kubevirt-cr.yaml` and rebuild.
 
-## Upgrade KubeVirt
+## Upgrade versions
 
-Change `KUBEVIRT_VERSION` in `.github/workflows/build-rootfs.yml` and push. All three images pick up the new operator manifest, `virtctl`, preloaded images, and test VM disk tag.
+Change `KUBEVIRT_VERSION` in `.github/workflows/build-rootfs.yml` and push. All three images pick up the new operator manifest, `virtctl`, preloaded images, and test VM disk tag. `CDI_VERSION` and `KUBEVIRT_MANAGER_VERSION` work the same way, from the same `env` block.
