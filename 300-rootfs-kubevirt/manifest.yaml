@@ -97,6 +97,11 @@ playground:
       name: KubeVirt Manager
       machine: cplane-01
       number: 30080
+    - id: vm-screen
+      kind: http-port
+      name: VM Screen
+      machine: dev-machine
+      number: 6080
     - id: terminal-dev-machine
       kind: terminal
       name: dev-machine
@@ -124,45 +129,6 @@ playground:
         until [ "$(kubectl get nodes --no-headers 2>/dev/null | grep -cw Ready)" -eq 3 ]; do
           sleep 5
         done
-    init_wait_kubevirt:
-      init: true
-      machine: dev-machine
-      user: root
-      timeout_seconds: 900
-      needs:
-        - init_wait_nodes
-      run: |
-        export KUBECONFIG=/root/.kube/config
-        until kubectl -n kubevirt wait kubevirt kubevirt --for=condition=Available --timeout=10s >/dev/null 2>&1; do
-          sleep 5
-        done
-        kubectl -n kubevirt get kubevirt kubevirt
-    init_wait_cdi:
-      init: true
-      machine: dev-machine
-      user: root
-      timeout_seconds: 600
-      needs:
-        - init_wait_nodes
-      run: |
-        export KUBECONFIG=/root/.kube/config
-        until kubectl wait cdi cdi --for=condition=Available --timeout=10s >/dev/null 2>&1; do
-          sleep 5
-        done
-        kubectl get cdi cdi
-    init_wait_kubevirt_manager:
-      init: true
-      machine: dev-machine
-      user: root
-      timeout_seconds: 600
-      needs:
-        - init_wait_nodes
-      run: |
-        export KUBECONFIG=/root/.kube/config
-        until kubectl -n kubevirt-manager rollout status deploy/kubevirt-manager --timeout=10s >/dev/null 2>&1; do
-          sleep 5
-        done
-        kubectl -n kubevirt-manager get svc kubevirt-manager
   accessControl:
     canList:
       - owner
