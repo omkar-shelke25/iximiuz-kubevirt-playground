@@ -1,1 +1,40 @@
-
+# A small CirrOS VM for testing. Its disk image is preloaded in this rootfs.
+# Start it with: virtctl start testvm
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: testvm
+spec:
+  runStrategy: Halted
+  template:
+    metadata:
+      labels:
+        kubevirt.io/vm: testvm
+    spec:
+      domain:
+        devices:
+          disks:
+          - name: containerdisk
+            disk:
+              bus: virtio
+          - name: cloudinitdisk
+            disk:
+              bus: virtio
+          interfaces:
+          - name: default
+            masquerade: {}
+        resources:
+          requests:
+            memory: 128Mi
+      networks:
+      - name: default
+        pod: {}
+      volumes:
+      - name: containerdisk
+        containerDisk:
+          image: quay.io/kubevirt/cirros-container-disk-demo:KUBEVIRT_VERSION
+      - name: cloudinitdisk
+        cloudInitNoCloud:
+          userData: |
+            #!/bin/sh
+            echo "hello from testvm"

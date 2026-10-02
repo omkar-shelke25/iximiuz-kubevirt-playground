@@ -1,0 +1,29 @@
+Welcome to the KubeVirt on K3s playground!
+
+Run virtual machines next to containers on a multi-node K3s cluster.
+
+Machines:
+
+  dev-machine  172.16.0.5  you are here: Docker, kubectl, virtctl, helm, k9s
+  cplane-01    172.16.0.2  K3s server, KubeVirt control plane
+  node-01      172.16.0.3  K3s agent, runs VMs
+  node-02      172.16.0.4  K3s agent, runs VMs
+
+KubeVirt is installed and running in emulation mode. Try it:
+
+  kubectl get nodes
+  kubectl -n kubevirt get kubevirt kubevirt
+  kubectl apply -f ~/testvm.yaml
+  virtctl start testvm
+  kubectl get vmi -o wide     (see which node it landed on)
+  virtctl console testvm      (user cirros, password gocubsgo, leave with Ctrl+])
+
+Good to know:
+
+- There is no nested virtualization here, so VMs use software emulation.
+  Small images such as CirrOS boot in seconds, Ubuntu takes a few minutes.
+- Every machine has zsh with a Catppuccin Mocha prompt showing your Kubernetes
+  context and namespace, plus eza, bat, fd, zoxide, atuin, lazygit and delta.
+- Using a Nerd Font locally over `labctl ssh`? Run `icons on` for the
+  powerline prompt and file icons. `icons off` switches back.
+- Playground VMs are short-lived. Do not store anything important here.
