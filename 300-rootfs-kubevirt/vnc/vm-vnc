@@ -1,1 +1,59 @@
-444
+#!/usr/bin/env bash
+#
+# vm-vnc: show a KubeVirt VM's screen in the browser with noVNC.
+#
+#   virtctl vnc --proxy-only  VM screen -> VNC on 127.0.0.1:VNC_PORT
+#   websockify + noVNC        VNC -> browser on 0.0.0.0:WEB_PORT
+#
+# Usage: vm-vnc <vm-name> [namespace]
+# Then open http://<this-machine>:6080, or the playground's "VM Screen" tab.
+# Press Ctrl+C to stop.
+
+set -u
+
+vm="${1:-}"
+namespace="${2:-default}"
+vnc_port="${VNC_PORT:-5900}"
+web_port="${WEB_PORT:-6080}"
+
+if [ -z "$vm" ]; then
+  echo "usage: vm-vnc <vm-name> [namespace]"
+  exit 1
+fi
+
+if ! kubectl -n "$namespace" get vmi "$vm" >/dev/null 2>&1; then
+  echo "VM ${namespace}/${vm} is not running. Start it with: virtctl start ${vm} -n ${namespace}"
+  exit 1
+fi
+
+# Stop the proxy loop and websockify together on Ctrl+C or exit.
+trap 'kill 0' EXIT INT TERM
+
+proxy_log="/tmp/vm-vnc-${namespace}-${vm}.log"
+: > "$proxy_log"
+
+# The virtctl proxy can end after a VNC session, so restart it every time
+# it exits. This keeps browser reconnects working.
+(
+  until false; do
+    virtctl vnc "$vm" -n "$namespace" --proxy-only --port "$vnc_port" >>"$proxy_log" 2>&1
+    sleep 1
+  done
+) &
+
+# virtctl prints the port it listens on once the proxy is ready.
+waited=0
+until grep -q "port" "$proxy_log"; do
+  if [ "$waited" -ge 30 ]; then
+    echo "virtctl vnc proxy did not start. Its output:"
+    cat "$proxy_log"
+    exit 1
+  fi
+  sleep 1
+  waited=$((waited + 1))
+done
+
+echo "VM screen for ${namespace}/${vm}"
+echo "  Browser: http://<this-machine>:${web_port}  (or the playground's VM Screen tab)"
+echo "  Press Ctrl+C to stop."
+websockify --web /usr/share/novnc "0.0.0.0:${web_port}" "127.0.0.1:${vnc_port}" >/dev/null 2>&1
