@@ -1,14 +1,17 @@
 # syntax=docker/dockerfile:1
 #
-# iximiuz Labs rootfs images for a multi-node K3s cluster with KubeVirt:
+# iximiuz Labs rootfs images for a multi-node K3s cluster with KubeVirt, CDI,
+# and the KubeVirt Manager web UI:
 #
-#   --target cplane       K3s server at 172.16.0.2, applies KubeVirt at boot
+#   --target cplane       K3s server at 172.16.0.2, applies KubeVirt, CDI and
+#                         KubeVirt Manager at boot
 #   --target node         K3s agent, joins 172.16.0.2
 #   --target dev-machine  Docker, kubectl, virtctl, code-server (no K3s)
 #
 # Each target builds on the matching official iximiuz rootfs, so K3s, the join
 # token, sshd, the laborant user and the kubeconfig setup come from there.
-# All three get the Catppuccin Mocha terminal used in the Rust and OpenTofu playgrounds.
+# All three get the same terminal setup as the Rust and OpenTofu playgrounds,
+# with the Tokyo Night theme.
 
 ARG CPLANE_BASE=ghcr.io/iximiuz/labs/rootfs:ubuntu-k3s-server
 ARG NODE_BASE=ghcr.io/iximiuz/labs/rootfs:ubuntu-k3s-agent
@@ -65,39 +68,91 @@ EOR
 
 # =============================================================================
 # Stage: kubevirt
-# virtctl, the K3s auto-deploy manifests, and preloaded image tarballs.
+# virtctl, the K3s auto-deploy manifests (KubeVirt, CDI, KubeVirt Manager),
+# and preloaded image tarballs.
 # =============================================================================
 FROM ${BUILDER_BASE} AS kubevirt
 
 ARG KUBEVIRT_VERSION=v1.9.0
+ARG CDI_VERSION=v1.66.1
+ARG KUBEVIRT_MANAGER_VERSION=1.5.4
+ARG KUBEVIRT_MANAGER_NODEPORT=30080
 ARG PRELOAD_IMAGES=true
 
 USER root
 ENV HOME=/root
 
 COPY kubevirt/20-kubevirt-cr.yaml /out/manifests/20-kubevirt-cr.yaml
+COPY kubevirt/40-cdi-cr.yaml /out/manifests/40-cdi-cr.yaml
 COPY kubevirt/preload-images.sh /tmp/preload-images.sh
 
 RUN <<EOR
 set -eu
+gh=https://github.com
+m=/out/manifests
 mkdir -p /out/bin /out/images/cplane /out/images/node
 echo "${KUBEVIRT_VERSION}" > /out/kubevirt-version
 
+# virtctl
 curl -fsSL -o /out/bin/virtctl \
-  "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/virtctl-${KUBEVIRT_VERSION}-linux-amd64"
+  "$gh/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/virtctl-${KUBEVIRT_VERSION}-linux-amd64"
 chmod 0755 /out/bin/virtctl
 
-# The operator runs with 1 replica instead of 2.
-curl -fsSL -o /out/manifests/10-kubevirt-operator.yaml \
-  "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/kubevirt-operator.yaml"
+# KubeVirt operator, with 1 replica instead of 2.
+curl -fsSL -o "$m/10-kubevirt-operator.yaml" \
+  "$gh/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/kubevirt-operator.yaml"
 yq -i '(select(.kind == "Deployment" and .metadata.name == "virt-operator") | .spec.replicas) = 1' \
-  /out/manifests/10-kubevirt-operator.yaml
+  "$m/10-kubevirt-operator.yaml"
 
-if [ "${PRELOAD_IMAGES}" = "true" ]; then
-  sh /tmp/preload-images.sh "${KUBEVIRT_VERSION}" /out/images
+# CDI (Containerized Data Importer): imports VM disk images into PVCs, using
+# K3s' default local-path StorageClass. The operator is pinned to the K3s
+# server, where its image is preloaded. 40-cdi-cr.yaml pins the rest of CDI.
+curl -fsSL -o "$m/30-cdi-operator.yaml" \
+  "$gh/kubevirt/containerized-data-importer/releases/download/${CDI_VERSION}/cdi-operator.yaml"
+yq -i '(select(.kind == "Deployment" and .metadata.name == "cdi-operator") | .spec.template.spec.nodeSelector["node-role.kubernetes.io/control-plane"]) = "true"' \
+  "$m/30-cdi-operator.yaml"
+
+# KubeVirt Manager web UI: pinned to the K3s server, Service on a fixed NodePort
+# so the playground manifest can open it as a tab.
+curl -fsSL -o "$m/50-kubevirt-manager.yaml" \
+  "https://raw.githubusercontent.com/kubevirt-manager/kubevirt-manager/v${KUBEVIRT_MANAGER_VERSION}/kubernetes/bundled.yaml"
+yq -i '(select(.kind == "Deployment" and .metadata.name == "kubevirt-manager") | .spec.template.spec.nodeSelector["node-role.kubernetes.io/control-plane"]) = "true"
+  | (select(.kind == "Service" and .metadata.name == "kubevirt-manager") | .spec.type) = "NodePort"
+  | (select(.kind == "Service" and .metadata.name == "kubevirt-manager") | .spec.ports[0].nodePort) = env(KUBEVIRT_MANAGER_NODEPORT)' \
+  "$m/50-kubevirt-manager.yaml"
+
+# Upstream's manifest uses the :nightly image. Use the release tag when it exists.
+manager_image="docker.io/kubevirtmanager/kubevirt-manager:${KUBEVIRT_MANAGER_VERSION}"
+if crane digest "$manager_image" >/dev/null 2>&1; then
+  MANAGER_IMAGE="$manager_image" yq -i '(select(.kind == "Deployment" and .metadata.name == "kubevirt-manager") | .spec.template.spec.containers[0].image) = env(MANAGER_IMAGE)' \
+    "$m/50-kubevirt-manager.yaml"
 else
-  echo "image preloading disabled"
+  echo "WARNING: ${manager_image} not found, keeping the image from the upstream manifest"
 fi
+manager_image=$(yq 'select(.kind == "Deployment" and .metadata.name == "kubevirt-manager") | .spec.template.spec.containers[0].image' \
+  "$m/50-kubevirt-manager.yaml")
+echo "KubeVirt Manager image: ${manager_image}"
+
+if [ "${PRELOAD_IMAGES}" != "true" ]; then
+  echo "image preloading disabled"
+  exit 0
+fi
+
+# Infra pods run on the K3s server. VMs and CDI importer pods can run on any node.
+kv=quay.io/kubevirt
+CPLANE_IMAGES="$kv/virt-operator:${KUBEVIRT_VERSION} $kv/virt-api:${KUBEVIRT_VERSION}
+  $kv/virt-controller:${KUBEVIRT_VERSION} $kv/virt-exportproxy:${KUBEVIRT_VERSION}
+  $kv/virt-handler:${KUBEVIRT_VERSION} $kv/virt-launcher:${KUBEVIRT_VERSION}
+  $kv/cirros-container-disk-demo:${KUBEVIRT_VERSION}
+  $kv/cdi-operator:${CDI_VERSION} $kv/cdi-apiserver:${CDI_VERSION}
+  $kv/cdi-controller:${CDI_VERSION} $kv/cdi-uploadproxy:${CDI_VERSION}
+  $kv/cdi-importer:${CDI_VERSION}
+  ${manager_image}"
+NODE_IMAGES="$kv/virt-handler:${KUBEVIRT_VERSION} $kv/virt-launcher:${KUBEVIRT_VERSION}
+  $kv/cirros-container-disk-demo:${KUBEVIRT_VERSION}
+  $kv/cdi-importer:${CDI_VERSION}"
+export CPLANE_IMAGES NODE_IMAGES
+sh /tmp/preload-images.sh /out/images
 EOR
 
 # =============================================================================
@@ -132,6 +187,9 @@ ln -s /etc/systemd/system/selinuxfs-unmount.service \
   /etc/systemd/system/k3s.service.wants/selinuxfs-unmount.service
 test -f /var/lib/rancher/k3s/server/manifests/10-kubevirt-operator.yaml
 test -f /var/lib/rancher/k3s/server/manifests/20-kubevirt-cr.yaml
+test -f /var/lib/rancher/k3s/server/manifests/30-cdi-operator.yaml
+test -f /var/lib/rancher/k3s/server/manifests/40-cdi-cr.yaml
+test -f /var/lib/rancher/k3s/server/manifests/50-kubevirt-manager.yaml
 EOR
 
 RUN --mount=type=bind,source=terminal,target=/tmp/terminal \
@@ -201,12 +259,12 @@ ENV HOME=/home/$LAB_USER
 # code-server extensions. A missing extension only prints a warning.
 RUN <<EOR
 set -u
-for ext in catppuccin.catppuccin-vsc redhat.vscode-yaml ms-kubernetes-tools.vscode-kubernetes-tools; do
+for ext in enkia.tokyo-night redhat.vscode-yaml ms-kubernetes-tools.vscode-kubernetes-tools; do
   code-server --install-extension "$ext" || echo "WARNING: could not install ${ext}"
 done
 EOR
 
-# code-server: zsh login terminal, Catppuccin Mocha theme, Kubernetes YAML schemas.
+# code-server: zsh login terminal, Tokyo Night theme, Kubernetes YAML schemas.
 # The font list lets a locally installed Nerd Font draw icons after `icons on`.
 # Merges into the settings the base image already ships.
 RUN <<EOR
@@ -215,7 +273,7 @@ dir="$HOME/.local/share/code-server/User"
 mkdir -p "$dir"
 cat > /tmp/kubevirt-settings.json <<'JSON'
 {
-  "workbench.colorTheme": "Catppuccin Mocha",
+  "workbench.colorTheme": "Tokyo Night",
   "terminal.integrated.defaultProfile.linux": "zsh",
   "terminal.integrated.profiles.linux": {
     "zsh": { "path": "zsh", "args": ["-l"] },
