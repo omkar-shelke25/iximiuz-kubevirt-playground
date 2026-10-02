@@ -1,0 +1,12 @@
+[Unit]
+Description=Unmount selinuxfs when no SELinux policy is loaded (KubeVirt workaround)
+After=local-fs.target
+Before=k3s.service k3s-agent.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/iximiuz-labs/selinuxfs-unmount.sh
+
+[Install]
+WantedBy=multi-user.target
