@@ -15,6 +15,8 @@ permissions:
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/kubevirt-playground
   KUBEVIRT_VERSION: v1.9.0
+  CDI_VERSION: v1.66.1
+  KUBEVIRT_MANAGER_VERSION: 1.5.4
 
 jobs:
   build:
@@ -46,6 +48,8 @@ jobs:
           push: true
           build-args: |
             KUBEVIRT_VERSION=${{ env.KUBEVIRT_VERSION }}
+            CDI_VERSION=${{ env.CDI_VERSION }}
+            KUBEVIRT_MANAGER_VERSION=${{ env.KUBEVIRT_MANAGER_VERSION }}
           tags: |
             ${{ env.IMAGE }}:${{ matrix.target }}
             ${{ env.IMAGE }}:${{ matrix.target }}-${{ env.KUBEVIRT_VERSION }}
