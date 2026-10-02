@@ -1,1 +1,141 @@
+kind: playground
+name: kubevirt-k3s
+base: flexbox
+title: KubeVirt on K3s
+description: Multi-node K3s cluster with KubeVirt preinstalled. Run virtual machines next to containers, managed with kubectl and virtctl.
+categories:
+  - kubernetes
+markdown: |
+  A multi-node K3s cluster with KubeVirt preinstalled and ready to run virtual machines:
+  a dev machine with Docker, one control plane node, and two worker nodes.
 
+  iximiuz Labs playgrounds have no nested virtualization, so KubeVirt runs VMs with
+  QEMU software emulation. Small images such as CirrOS boot in seconds.
+
+  Included: K3s, KubeVirt, virtctl, kubectl, helm, k9s, Docker, and a Catppuccin Mocha
+  zsh terminal on every machine.
+playground:
+  networks:
+    - name: local
+      subnet: 172.16.0.0/24
+  machines:
+    - name: dev-machine
+      users:
+        - name: root
+        - name: laborant
+          default: true
+      drives:
+        - source: oci://ghcr.io/omkar-shelke25/kubevirt-playground:dev-machine
+          mount: /
+          size: 30GiB
+      network:
+        interfaces:
+          - network: local
+            address: 172.16.0.5/24
+      resources:
+        cpuCount: 2
+        ramSize: 4GiB
+    - name: cplane-01
+      users:
+        - name: root
+        - name: laborant
+          default: true
+      drives:
+        - source: oci://ghcr.io/omkar-shelke25/kubevirt-playground:cplane
+          mount: /
+          size: 30GiB
+      network:
+        interfaces:
+          - network: local
+            address: 172.16.0.2/24
+      resources:
+        cpuCount: 4
+        ramSize: 4GiB
+    - name: node-01
+      users:
+        - name: root
+        - name: laborant
+          default: true
+      drives:
+        - source: oci://ghcr.io/omkar-shelke25/kubevirt-playground:node
+          mount: /
+          size: 30GiB
+      network:
+        interfaces:
+          - network: local
+            address: 172.16.0.3/24
+      resources:
+        cpuCount: 2
+        ramSize: 4GiB
+    - name: node-02
+      users:
+        - name: root
+        - name: laborant
+          default: true
+      drives:
+        - source: oci://ghcr.io/omkar-shelke25/kubevirt-playground:node
+          mount: /
+          size: 30GiB
+      network:
+        interfaces:
+          - network: local
+            address: 172.16.0.4/24
+      resources:
+        cpuCount: 2
+        ramSize: 4GiB
+  tabs:
+    - id: ide-dev-machine
+      kind: ide
+      name: IDE
+      machine: dev-machine
+    - id: kexp-dev-machine
+      kind: kexp
+      name: Explorer
+      machine: dev-machine
+    - id: terminal-dev-machine
+      kind: terminal
+      name: dev-machine
+      machine: dev-machine
+    - id: terminal-cplane-01
+      kind: terminal
+      name: cplane-01
+      machine: cplane-01
+    - id: terminal-node-01
+      kind: terminal
+      name: node-01
+      machine: node-01
+    - id: terminal-node-02
+      kind: terminal
+      name: node-02
+      machine: node-02
+  initTasks:
+    init_wait_nodes:
+      init: true
+      machine: dev-machine
+      user: root
+      timeout_seconds: 300
+      run: |
+        export KUBECONFIG=/root/.kube/config
+        until [ "$(kubectl get nodes --no-headers 2>/dev/null | grep -cw Ready)" -eq 3 ]; do
+          sleep 5
+        done
+    init_wait_kubevirt:
+      init: true
+      machine: dev-machine
+      user: root
+      timeout_seconds: 900
+      needs:
+        - init_wait_nodes
+      run: |
+        export KUBECONFIG=/root/.kube/config
+        until kubectl -n kubevirt wait kubevirt kubevirt --for=condition=Available --timeout=10s >/dev/null 2>&1; do
+          sleep 5
+        done
+        kubectl -n kubevirt get kubevirt kubevirt
+  accessControl:
+    canList:
+      - owner
+    canRead:
+      - owner
+    canStart:
+      - owner
