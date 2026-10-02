@@ -45,23 +45,23 @@ bin=/opt/tools/bin
 mkdir -p "$bin" /opt/fastfetch
 
 curl -fsSL "$gh/starship/starship/releases/download/v${STARSHIP_VERSION}/starship-${musl}.tar.gz" \
-  | tar -xz -C "$bin" starship
+  | tar -xz --no-same-owner -C "$bin" starship
 curl -fsSL "$gh/eza-community/eza/releases/download/v${EZA_VERSION}/eza_${musl}.tar.gz" \
-  | tar -xz -C "$bin" ./eza
+  | tar -xz --no-same-owner -C "$bin" ./eza
 curl -fsSL "$gh/sharkdp/bat/releases/download/v${BAT_VERSION}/bat-v${BAT_VERSION}-${musl}.tar.gz" \
-  | tar -xz --strip-components=1 -C "$bin" "bat-v${BAT_VERSION}-${musl}/bat"
+  | tar -xz --no-same-owner --strip-components=1 -C "$bin" "bat-v${BAT_VERSION}-${musl}/bat"
 curl -fsSL "$gh/sharkdp/fd/releases/download/v${FD_VERSION}/fd-v${FD_VERSION}-${musl}.tar.gz" \
-  | tar -xz --strip-components=1 -C "$bin" "fd-v${FD_VERSION}-${musl}/fd"
+  | tar -xz --no-same-owner --strip-components=1 -C "$bin" "fd-v${FD_VERSION}-${musl}/fd"
 curl -fsSL "$gh/ajeetdsouza/zoxide/releases/download/v${ZOXIDE_VERSION}/zoxide-${ZOXIDE_VERSION}-${musl}.tar.gz" \
-  | tar -xz -C "$bin" zoxide
+  | tar -xz --no-same-owner -C "$bin" zoxide
 curl -fsSL "$gh/dandavison/delta/releases/download/${DELTA_VERSION}/delta-${DELTA_VERSION}-${musl}.tar.gz" \
-  | tar -xz --strip-components=1 -C "$bin" "delta-${DELTA_VERSION}-${musl}/delta"
+  | tar -xz --no-same-owner --strip-components=1 -C "$bin" "delta-${DELTA_VERSION}-${musl}/delta"
 curl -fsSL "$gh/atuinsh/atuin/releases/download/v${ATUIN_VERSION}/atuin-${musl}.tar.gz" \
-  | tar -xz --strip-components=1 -C "$bin" "atuin-${musl}/atuin"
+  | tar -xz --no-same-owner --strip-components=1 -C "$bin" "atuin-${musl}/atuin"
 curl -fsSL "$gh/jesseduffield/lazygit/releases/download/v${LAZYGIT_VERSION}/lazygit_${LAZYGIT_VERSION}_linux_x86_64.tar.gz" \
-  | tar -xz -C "$bin" lazygit
+  | tar -xz --no-same-owner -C "$bin" lazygit
 curl -fsSL "$gh/fastfetch-cli/fastfetch/releases/download/${FASTFETCH_VERSION}/fastfetch-linux-amd64.tar.gz" \
-  | tar -xz --strip-components=2 -C /opt/fastfetch
+  | tar -xz --no-same-owner --strip-components=2 -C /opt/fastfetch
 
 chmod 0755 "$bin"/*
 EOR
