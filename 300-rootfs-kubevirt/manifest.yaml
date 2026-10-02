@@ -2,7 +2,7 @@ kind: playground
 name: kubevirt-k3s
 base: flexbox
 title: KubeVirt on K3s
-description: Multi-node K3s cluster with KubeVirt preinstalled. Run virtual machines next to containers, managed with kubectl and virtctl.
+description: Multi-node K3s cluster with KubeVirt, CDI and the KubeVirt Manager web UI preinstalled. Run virtual machines next to containers.
 categories:
   - kubernetes
 markdown: |
@@ -12,8 +12,8 @@ markdown: |
   iximiuz Labs playgrounds have no nested virtualization, so KubeVirt runs VMs with
   QEMU software emulation. Small images such as CirrOS boot in seconds.
 
-  Included: K3s, KubeVirt, virtctl, kubectl, helm, k9s, Docker, and a Catppuccin Mocha
-  zsh terminal on every machine.
+  Included: K3s, KubeVirt, CDI, the KubeVirt Manager web UI, virtctl, kubectl, helm, k9s,
+  Docker, and a Tokyo Night zsh terminal on every machine.
 playground:
   networks:
     - name: local
@@ -92,6 +92,11 @@ playground:
       kind: kexp
       name: Explorer
       machine: dev-machine
+    - id: kubevirt-manager
+      kind: http-port
+      name: KubeVirt Manager
+      machine: cplane-01
+      number: 30080
     - id: terminal-dev-machine
       kind: terminal
       name: dev-machine
@@ -132,6 +137,32 @@ playground:
           sleep 5
         done
         kubectl -n kubevirt get kubevirt kubevirt
+    init_wait_cdi:
+      init: true
+      machine: dev-machine
+      user: root
+      timeout_seconds: 600
+      needs:
+        - init_wait_nodes
+      run: |
+        export KUBECONFIG=/root/.kube/config
+        until kubectl wait cdi cdi --for=condition=Available --timeout=10s >/dev/null 2>&1; do
+          sleep 5
+        done
+        kubectl get cdi cdi
+    init_wait_kubevirt_manager:
+      init: true
+      machine: dev-machine
+      user: root
+      timeout_seconds: 600
+      needs:
+        - init_wait_nodes
+      run: |
+        export KUBECONFIG=/root/.kube/config
+        until kubectl -n kubevirt-manager rollout status deploy/kubevirt-manager --timeout=10s >/dev/null 2>&1; do
+          sleep 5
+        done
+        kubectl -n kubevirt-manager get svc kubevirt-manager
   accessControl:
     canList:
       - owner
