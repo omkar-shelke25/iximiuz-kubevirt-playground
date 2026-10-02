@@ -25,6 +25,10 @@ rm -rf /var/lib/apt/lists/*
 
 # ─── Shell completions for whatever CLIs this image has ───────────────────────
 mkdir -p /etc/bash_completion.d /usr/local/share/zsh/site-functions
+# compinit skips completion folders not owned by root, and release archives
+# (fastfetch ships one) can carry another owner. Make sure root owns it.
+chown -R root:root /usr/local/share/zsh
+chmod 0755 /usr/local/share/zsh /usr/local/share/zsh/site-functions
 for cmd in kubectl helm virtctl crane docker; do
   if command -v "$cmd" >/dev/null 2>&1; then
     "$cmd" completion zsh > "/usr/local/share/zsh/site-functions/_${cmd}" 2>/dev/null \
@@ -238,6 +242,23 @@ git config --system delta.line-numbers true
 git config --system delta.syntax-theme "Tokyo Night"
 git config --system merge.conflictStyle zdiff3
 
+# ─── bat and delta: Tokyo Night syntax theme ─────────────────────────────────
+# bat does not ship Tokyo Night, so it is added from tokyonight.nvim and built
+# into a shared theme cache. Both bat and delta read ~/.cache/bat, which is
+# linked to that shared cache for root and the lab user.
+TOKYONIGHT_REF="${TOKYONIGHT_REF:-v4.14.1}"
+mkdir -p /tmp/bat-src/themes /usr/local/share/bat-cache
+curl -fsSL -o "/tmp/bat-src/themes/Tokyo Night.tmTheme" \
+  "https://raw.githubusercontent.com/folke/tokyonight.nvim/${TOKYONIGHT_REF}/extras/sublime/tokyonight_night.tmTheme"
+bat cache --build --source /tmp/bat-src --target /usr/local/share/bat-cache
+rm -rf /tmp/bat-src
+for home in /root "/home/${LAB_USER}"; do
+  mkdir -p "$home/.cache"
+  rm -rf "$home/.cache/bat"
+  ln -s /usr/local/share/bat-cache "$home/.cache/bat"
+done
+chown -h "${LAB_USER}:" "/home/${LAB_USER}/.cache" "/home/${LAB_USER}/.cache/bat"
+
 # ─── Shared env, sourced by bash and zsh ──────────────────────────────────────
 cat > /etc/profile.d/kubevirt-shell.sh <<'PROFILE'
 export BAT_THEME="Tokyo Night"
@@ -286,6 +307,7 @@ bindkey '^[[1;5C' forward-word
 bindkey '^[[1;5D' backward-word
 
 # Completion (_kubectl, _helm, _virtctl and _crane live in /usr/local/share/zsh/site-functions)
+fpath=(/usr/local/share/zsh/site-functions $fpath)
 autoload -Uz compinit && compinit -i
 zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
