@@ -23,6 +23,9 @@ The layout matches the official iximiuz `k3s` playground: one dev machine with D
     ├── manifest.yaml                 # iximiuz Labs playground manifest (4 machines)
     ├── terminal/
     │   └── setup.sh                  # Tokyo Night terminal, run in every target
+    ├── vnc/
+    │   ├── vm-vnc                    # VM screen in the browser: virtctl vnc + websockify + noVNC
+    │   └── index.html                # noVNC landing page with autoconnect
     ├── kubevirt/
     │   ├── 20-kubevirt-cr.yaml       # KubeVirt CR: emulation on, 1 replica
     │   ├── 40-cdi-cr.yaml            # CDI CR: infra pinned to the K3s server
@@ -59,6 +62,7 @@ What each target adds on top of its base:
 | Preloaded images | 13 (see below) | 4 | |
 | `selinuxfs-unmount.service` | Before `k3s.service` | Before `k3s-agent.service` | |
 | `virtctl` | Yes | | Yes |
+| `novnc`, `websockify`, `vm-vnc` | Yes | | Yes |
 | Tokyo Night terminal | Yes | Yes | Yes |
 | code-server theme and Kubernetes extensions | | | Yes |
 | `~/testvm.yaml` and welcome banner | | | Yes |
@@ -134,6 +138,36 @@ could not retrieve pid 22479 selinux label: getxattr /proc/22479/attr/current: o
 ```
 
 `selinuxfs-unmount.service` runs on `cplane-01`, `node-01`, and `node-02` before K3s on every boot. It unmounts `/sys/fs/selinux` only in that exact state: mounted, with PID 1 still labeled `kernel` (no policy). KubeVirt then sees SELinux as disabled and VMs start normally.
+
+## VM screen in the browser
+
+`vm-vnc` shows a VM's graphical console in a browser tab, with no VNC client needed. It's installed on `dev-machine` and `cplane-01`.
+
+```bash
+vm-vnc testvm
+```
+
+Then open the playground's **VM Screen** tab (port `6080` on `dev-machine`). Press `Ctrl+C` to stop.
+
+| Part | Role |
+|---|---|
+| `virtctl vnc <vm> --proxy-only --port 5900` | Connects to the VM's VNC console through the Kubernetes API, on `127.0.0.1:5900` |
+| `websockify` (Ubuntu package) | Bridges that VNC port to a WebSocket and serves noVNC on `0.0.0.0:6080` |
+| `novnc` (Ubuntu package) | The browser VNC client in `/usr/share/novnc` |
+| `index.html` | Opens `vnc.html` with autoconnect, scaling, and reconnect turned on |
+
+`vm-vnc` restarts the `virtctl` proxy whenever it exits, so reloading the tab reconnects. `Ctrl+C` stops the proxy and websockify together.
+
+| Option | Example | Effect |
+|---|---|---|
+| Namespace | `vm-vnc myvm my-namespace` | VM in another namespace (default `default`) |
+| `WEB_PORT` | `WEB_PORT=6081 vm-vnc myvm` | Browser port. Change the tab in `manifest.yaml` to match. |
+| `VNC_PORT` | `VNC_PORT=5901 vm-vnc myvm` | Local port between `virtctl` and websockify |
+
+> [!NOTE]
+> The VNC console shows the VM's own screen. Cloud images such as CirrOS, Ubuntu, and AlmaLinux have no desktop, so you see a text login. A graphical login needs a desktop and display manager inside the guest.
+
+On `cplane-01` there is no tab for port 6080. Use the playground's port exposing option on `cplane-01` with port `6080` instead.
 
 ## Terminal
 
@@ -306,6 +340,8 @@ You should see `selinuxfs unmounted (no SELinux policy loaded)`.
 | Playground start times out on `init_wait_cdi` | `kubectl -n cdi get pods -o wide`. CDI pods are pinned to `cplane-01`, so a full `cplane-01` blocks them. |
 | KubeVirt Manager tab shows an error | `kubectl -n kubevirt-manager get pods,svc`. The Service must be NodePort `30080`. |
 | KubeVirt Manager says `CDI (Containerized Data Importer) not found!` | CDI isn't `Available` yet. `kubectl get cdi cdi` |
+| VM Screen tab shows `Failed to connect to server` | `vm-vnc` isn't running. Run `vm-vnc <vm>` on `dev-machine` and reload the tab. |
+| `vm-vnc` says the proxy didn't start | It prints `virtctl`'s output. Usually the VM isn't running: `virtctl start <vm>` |
 | A DataVolume stays `Pending` | `local-path` creates the disk only once a VM using it is scheduled. Start the VM. |
 
 > [!NOTE]
