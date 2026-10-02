@@ -1,40 +1,43 @@
 #!/bin/sh
 #
-# Pulls KubeVirt images as tarballs at build time. K3s imports every tarball in
+# Pulls images as tarballs at build time. K3s imports every tarball in
 # /var/lib/rancher/k3s/agent/images at boot, so nodes start without downloads.
 #
 # Each image is pulled once into a pool, then hard-linked into the folder of
 # every node role that needs it. A failed pull only prints a warning: that
 # image is then pulled at runtime instead.
 #
-# Usage: preload-images.sh <kubevirt-version> <out-dir>
+# Usage: CPLANE_IMAGES="<ref> ..." NODE_IMAGES="<ref> ..." preload-images.sh <out-dir>
 set -u
 
-version="$1"
-out="$2"
+out="$1"
 pool="${out}/pool"
 mkdir -p "$pool" "${out}/cplane" "${out}/node"
 
-# KubeVirt control plane pods are pinned to control plane nodes by the
-# operator, so only cplane needs them. Every node can run VMs.
-cplane_images="virt-operator virt-api virt-controller virt-exportproxy virt-handler virt-launcher cirros-container-disk-demo"
-node_images="virt-handler virt-launcher cirros-container-disk-demo"
+# quay.io/kubevirt/virt-api:v1.9.0 -> preload-virt-api.tar
+tarball() {
+  name="${1##*/}"
+  echo "preload-${name%%:*}.tar"
+}
 
-for image in $cplane_images; do
-  if crane pull --platform linux/amd64 "quay.io/kubevirt/${image}:${version}" "${pool}/kubevirt-${image}.tar"; then
-    echo "preloaded ${image}"
+for ref in $CPLANE_IMAGES $NODE_IMAGES; do
+  file="${pool}/$(tarball "$ref")"
+  [ -f "$file" ] && continue
+  if crane pull --platform linux/amd64 "$ref" "$file"; then
+    echo "preloaded ${ref}"
   else
-    echo "WARNING: could not preload ${image}, it will be pulled at runtime"
+    rm -f "$file"
+    echo "WARNING: could not preload ${ref}, it will be pulled at runtime"
   fi
 done
 
-for role in cplane node; do
-  if [ "$role" = cplane ]; then images=$cplane_images; else images=$node_images; fi
-  for image in $images; do
-    if [ -f "${pool}/kubevirt-${image}.tar" ]; then
-      ln "${pool}/kubevirt-${image}.tar" "${out}/${role}/kubevirt-${image}.tar"
-    fi
-  done
+for ref in $CPLANE_IMAGES; do
+  file="$(tarball "$ref")"
+  [ -f "${pool}/${file}" ] && ln "${pool}/${file}" "${out}/cplane/${file}"
+done
+for ref in $NODE_IMAGES; do
+  file="$(tarball "$ref")"
+  [ -f "${pool}/${file}" ] && ln "${pool}/${file}" "${out}/node/${file}"
 done
 
 rm -rf "$pool"
