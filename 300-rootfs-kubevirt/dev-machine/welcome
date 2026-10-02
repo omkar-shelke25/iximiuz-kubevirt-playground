@@ -9,7 +9,10 @@ Machines:
   node-01      172.16.0.3  K3s agent, runs VMs
   node-02      172.16.0.4  K3s agent, runs VMs
 
-KubeVirt is installed and running in emulation mode. Try it:
+KubeVirt and CDI are installed, and KubeVirt runs in emulation mode.
+The KubeVirt Manager web UI is in the "KubeVirt Manager" tab (NodePort 30080).
+
+Try it:
 
   kubectl get nodes
   kubectl -n kubevirt get kubevirt kubevirt
@@ -17,13 +20,19 @@ KubeVirt is installed and running in emulation mode. Try it:
   virtctl start testvm
   kubectl get vmi -o wide     (see which node it landed on)
   virtctl console testvm      (user cirros, password gocubsgo, leave with Ctrl+])
+  kubectl get cdi,storageclass
+
+See a VM's screen in the browser:
+
+  vm-vnc testvm               then open the VM Screen tab (Ctrl+C to stop)
 
 Good to know:
 
 - There is no nested virtualization here, so VMs use software emulation.
   Small images such as CirrOS boot in seconds, Ubuntu takes a few minutes.
-- Every machine has zsh with a Catppuccin Mocha prompt showing your Kubernetes
+- Every machine has zsh with a Tokyo Night prompt showing your Kubernetes
   context and namespace, plus eza, bat, fd, zoxide, atuin, lazygit and delta.
 - Using a Nerd Font locally over `labctl ssh`? Run `icons on` for the
   powerline prompt and file icons. `icons off` switches back.
+- KubeVirt Manager has no login. Anyone with the tab's link controls your VMs.
 - Playground VMs are short-lived. Do not store anything important here.
