@@ -108,7 +108,7 @@ CDI imports VM disk images into PersistentVolumeClaims, so VMs can have disks th
 The web UI opens in the playground's **KubeVirt Manager** tab, which points at NodePort `30080` on `cplane-01`. It lists VMs, starts and stops them, and opens a VNC console in the browser.
 
 > [!WARNING]
-> KubeVirt Manager has no login, and its ClusterRole can manage resources across the whole cluster. Anyone with the tab's link controls your VMs. Keep the playground's access set to `owner`, which is the default in `manifest.yaml`.
+> KubeVirt Manager has no login, and its ClusterRole can manage resources across the whole cluster. Anyone with the tab's link controls your VMs. Do not share the tab's link.
 
 The upstream operator places `virt-operator`, `virt-api`, and `virt-controller` on control plane nodes. That works unchanged here, because `cplane-01` is a real K3s server with the `node-role.kubernetes.io/control-plane` label. `virt-handler` runs on all three nodes, so VMs can land on any of them.
 
@@ -174,8 +174,6 @@ Then open the playground's **VM Screen** tab (port `6080` on `dev-machine`). Pre
 
 > [!NOTE]
 > The VNC console shows the VM's own screen. Cloud images such as CirrOS, Ubuntu, and AlmaLinux have no desktop, so you see a text login. A graphical login needs a desktop and display manager inside the guest.
-
-On `cplane-01` there is no tab for port 6080. Use the playground's port exposing option on `cplane-01` with port `6080` instead.
 
 ## Build VM images with Packer
 
@@ -297,14 +295,19 @@ labctl playground create kubevirt-k3s --base flexbox -f 300-rootfs-kubevirt/mani
 labctl playground start kubevirt-k3s-1a2b3c4d --open
 ```
 
-Four init tasks run on `dev-machine` before the playground opens. The last three wait for `init_wait_nodes` and then run in parallel:
+To update an existing playground from the manifest in this repo:
+
+```bash
+labctl playground update kubevirt-k3s-6fac2500 -f 300-rootfs-kubevirt/manifest.yaml
+```
+
+One init task runs on `dev-machine` before the playground opens:
 
 | Task | Waits until |
 |---|---|
 | `init_wait_nodes` | All 3 K3s nodes are `Ready` |
-| `init_wait_kubevirt` | KubeVirt is `Available` |
-| `init_wait_cdi` | CDI is `Available` |
-| `init_wait_kubevirt_manager` | The KubeVirt Manager Deployment is rolled out |
+
+KubeVirt, CDI, and KubeVirt Manager keep starting in the background for a few more minutes. The playground description lists the `kubectl wait` commands to run before creating a VM.
 
 | Machine | CPU / RAM | Disk |
 |---|---|---|
@@ -313,7 +316,7 @@ Four init tasks run on `dev-machine` before the playground opens. The last three
 | `node-01`, `node-02` | 2 vCPU / 4 GiB each | 30 GiB each |
 
 > [!WARNING]
-> That's 10 vCPU and 16 GiB in total, which needs a paid plan. On the free plan (5 vCPU / 8 GiB per playground), iximiuz Labs scales every machine down to about half, so each node gets about 2 GiB. Stick to the CirrOS test VM there.
+> That's 12 vCPU and 18 GiB in total, which needs a paid plan. On the free plan (5 vCPU / 8 GiB per playground), iximiuz Labs scales every machine down to about half, so each node gets about 2 GiB. Stick to the CirrOS test VM there.
 
 ## Verify
 
@@ -382,18 +385,20 @@ You should see `selinuxfs unmounted (no SELinux policy loaded)`.
 | Symptom | Check |
 |---|---|
 | Playground start times out on `init_wait_nodes` | On the stuck node: `sudo journalctl -u k3s-agent -f`. Agents join `https://172.16.0.2:6443`, so `cplane-01` must keep that IP. |
-| Playground start times out on `init_wait_kubevirt` | `kubectl -n kubevirt get pods -o wide`. A `Pending` pod usually means not enough memory. |
+| `kubectl wait` for KubeVirt times out | `kubectl -n kubevirt get pods -o wide`. A `Pending` pod usually means not enough memory. |
 | KubeVirt not installed at all | `kubectl get addons -n kube-system` lists the files K3s applied from its manifests folder, with any errors |
 | `kubectl` on `dev-machine` says connection refused | The kubeconfig copy from `cplane-01` hasn't finished. Check `sudo systemctl status kubeconfig-setup`. |
 | VM crashes a few seconds after start | On that VM's node: `systemctl status selinuxfs-unmount` and `grep selinuxfs /proc/mounts`. If still mounted, run `sudo umount /sys/fs/selinux`. |
 | VM stuck `Pending` with `Insufficient devices.kubevirt.io/kvm` | Emulation is off. `kubectl -n kubevirt get kubevirt kubevirt -o yaml \| grep useEmulation` |
 | Images pulled at runtime despite preloading | Check the build log for `WARNING: could not preload` |
-| Playground start times out on `init_wait_cdi` | `kubectl -n cdi get pods -o wide`. CDI pods are pinned to `cplane-01`, so a full `cplane-01` blocks them. |
+| `kubectl wait` for CDI times out | `kubectl -n cdi get pods -o wide`. CDI pods are pinned to `cplane-01`, so a full `cplane-01` blocks them. |
 | KubeVirt Manager tab shows an error | `kubectl -n kubevirt-manager get pods,svc`. The Service must be NodePort `30080`. |
 | KubeVirt Manager says `CDI (Containerized Data Importer) not found!` | CDI isn't `Available` yet. `kubectl get cdi cdi` |
 | VM Screen tab shows `Failed to connect to server` | `vm-vnc` isn't running. Run `vm-vnc <vm>` on `dev-machine` and reload the tab. |
 | `vm-vnc` says the proxy didn't start | It prints `virtctl`'s output. Usually the VM isn't running: `virtctl start <vm>` |
 | A DataVolume stays `Pending` | `local-path` creates the disk only once a VM using it is scheduled. Start the VM. |
+| `vm-image` says the import did not finish | `kubectl describe dv <vm-name>`. The cluster must reach `dev-machine` on port `8000`, or set `PORT` or `VM_IMAGE_HOST`. |
+| `packer build` waits a long time for SSH | QEMU runs without KVM, so the guest boots slowly. Raise `ssh_timeout`, or check the guest with `vnc://127.0.0.1:<port>` shown in the build output. |
 
 > [!NOTE]
 > K3s owns the objects it applies from its manifests folder. If you change the KubeVirt CR with `kubectl`, K3s may restore the file's version on its next restart. To change it permanently, edit `kubevirt/20-kubevirt-cr.yaml` and rebuild.
