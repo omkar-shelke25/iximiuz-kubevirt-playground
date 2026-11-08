@@ -4,7 +4,7 @@ Run virtual machines next to containers on a multi-node K3s cluster.
 
 Machines:
 
-  dev-machine  172.16.0.5  you are here: Docker, kubectl, virtctl, helm, k9s
+  dev-machine  172.16.0.5  you are here: build machine with Docker, Packer, QEMU, kubectl, virtctl, helm, k9s
   cplane-01    172.16.0.2  K3s server, KubeVirt control plane
   node-01      172.16.0.3  K3s agent, runs VMs
   node-02      172.16.0.4  K3s agent, runs VMs
@@ -22,13 +22,22 @@ Try it:
   virtctl console testvm      (user cirros, password gocubsgo, leave with Ctrl+])
   kubectl get cdi,storageclass
 
+Build a VM image with Packer and run it on KubeVirt:
+
+  cd ~/packer/cirros && packer init . && packer build .
+  vm-image deploy output-cirros/cirros-custom.qcow2
+  virtctl console cirros-custom      (user cirros, password gocubsgo)
+
+  More templates: ~/packer/ubuntu (slow, 10-20 min) and ~/packer/docker (container image).
+
 See a VM's screen in the browser:
 
   vm-vnc testvm               then open the VM Screen tab (Ctrl+C to stop)
 
 Good to know:
 
-- There is no nested virtualization here, so VMs use software emulation.
+- There is no nested virtualization here, so VMs and Packer's QEMU builds use
+  software emulation (accelerator = "tcg").
   Small images such as CirrOS boot in seconds, Ubuntu takes a few minutes.
 - Every machine has zsh with a Tokyo Night prompt showing your Kubernetes
   context and namespace, plus eza, bat, fd, zoxide, atuin, lazygit and delta.
