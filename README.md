@@ -4,6 +4,7 @@ Custom [iximiuz Labs](https://labs.iximiuz.com) rootfs images for a multi-node K
 
 The layout matches the official iximiuz `k3s` playground: one dev machine with Docker, one control plane node, and two worker nodes.
 
+
 | Machine | IP | Image | Role |
 |---|---|---|---|
 | `dev-machine` | 172.16.0.5 | `ghcr.io/omkar-shelke25/kubevirt-playground:dev-machine` | Build machine: Docker, Packer, QEMU, kubectl, virtctl, helm, k9s, code-server. No K3s. |
