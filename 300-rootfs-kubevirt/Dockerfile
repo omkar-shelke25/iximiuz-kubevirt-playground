@@ -42,32 +42,31 @@ ARG FASTFETCH_VERSION=2.71.0
 USER root
 ENV HOME=/root
 
-RUN <<EOR
+COPY build/gh-release-dl.sh /tmp/gh-release-dl.sh
+
+RUN --mount=type=secret,id=github_token,required=false <<EOR
 set -eu
-gh=https://github.com
 musl=x86_64-unknown-linux-musl
 bin=/opt/tools/bin
 mkdir -p "$bin" /opt/fastfetch
 
-# dl <url> <dest-dir> <strip-components> [member]
-# Downloads to a file first, so a failed download stops the build with curl's own error.
+# dl <owner/repo> <tag> <asset> <dest-dir> <strip-components> [member]
 dl() {
   f=/tmp/dl.tgz
-  curl -fSL --retry 10 --retry-all-errors --retry-delay 10 \
-    --connect-timeout 30 --max-time 300 -o "$f" "$1"
-  tar -xzf "$f" --no-same-owner --strip-components="$3" -C "$2" ${4:+"$4"}
+  sh /tmp/gh-release-dl.sh "$1" "$2" "$3" "$f"
+  tar -xzf "$f" --no-same-owner --strip-components="$5" -C "$4" ${6:+"$6"}
   rm -f "$f"
 }
 
-dl "$gh/starship/starship/releases/download/v${STARSHIP_VERSION}/starship-${musl}.tar.gz" "$bin" 0 starship
-dl "$gh/eza-community/eza/releases/download/v${EZA_VERSION}/eza_${musl}.tar.gz" "$bin" 0 ./eza
-dl "$gh/sharkdp/bat/releases/download/v${BAT_VERSION}/bat-v${BAT_VERSION}-${musl}.tar.gz" "$bin" 1 "bat-v${BAT_VERSION}-${musl}/bat"
-dl "$gh/sharkdp/fd/releases/download/v${FD_VERSION}/fd-v${FD_VERSION}-${musl}.tar.gz" "$bin" 1 "fd-v${FD_VERSION}-${musl}/fd"
-dl "$gh/ajeetdsouza/zoxide/releases/download/v${ZOXIDE_VERSION}/zoxide-${ZOXIDE_VERSION}-${musl}.tar.gz" "$bin" 0 zoxide
-dl "$gh/dandavison/delta/releases/download/${DELTA_VERSION}/delta-${DELTA_VERSION}-${musl}.tar.gz" "$bin" 1 "delta-${DELTA_VERSION}-${musl}/delta"
-dl "$gh/atuinsh/atuin/releases/download/v${ATUIN_VERSION}/atuin-${musl}.tar.gz" "$bin" 1 "atuin-${musl}/atuin"
-dl "$gh/jesseduffield/lazygit/releases/download/v${LAZYGIT_VERSION}/lazygit_${LAZYGIT_VERSION}_linux_x86_64.tar.gz" "$bin" 0 lazygit
-dl "$gh/fastfetch-cli/fastfetch/releases/download/${FASTFETCH_VERSION}/fastfetch-linux-amd64.tar.gz" /opt/fastfetch 2
+dl starship/starship "v${STARSHIP_VERSION}" "starship-${musl}.tar.gz" "$bin" 0 starship
+dl eza-community/eza "v${EZA_VERSION}" "eza_${musl}.tar.gz" "$bin" 0 ./eza
+dl sharkdp/bat "v${BAT_VERSION}" "bat-v${BAT_VERSION}-${musl}.tar.gz" "$bin" 1 "bat-v${BAT_VERSION}-${musl}/bat"
+dl sharkdp/fd "v${FD_VERSION}" "fd-v${FD_VERSION}-${musl}.tar.gz" "$bin" 1 "fd-v${FD_VERSION}-${musl}/fd"
+dl ajeetdsouza/zoxide "v${ZOXIDE_VERSION}" "zoxide-${ZOXIDE_VERSION}-${musl}.tar.gz" "$bin" 0 zoxide
+dl dandavison/delta "${DELTA_VERSION}" "delta-${DELTA_VERSION}-${musl}.tar.gz" "$bin" 1 "delta-${DELTA_VERSION}-${musl}/delta"
+dl atuinsh/atuin "v${ATUIN_VERSION}" "atuin-${musl}.tar.gz" "$bin" 1 "atuin-${musl}/atuin"
+dl jesseduffield/lazygit "v${LAZYGIT_VERSION}" "lazygit_${LAZYGIT_VERSION}_linux_x86_64.tar.gz" "$bin" 0 lazygit
+dl fastfetch-cli/fastfetch "${FASTFETCH_VERSION}" fastfetch-linux-amd64.tar.gz /opt/fastfetch 2
 
 chmod 0755 "$bin"/*
 EOR
@@ -91,30 +90,30 @@ ENV HOME=/root
 COPY kubevirt/20-kubevirt-cr.yaml /out/manifests/20-kubevirt-cr.yaml
 COPY kubevirt/40-cdi-cr.yaml /out/manifests/40-cdi-cr.yaml
 COPY kubevirt/preload-images.sh /tmp/preload-images.sh
+COPY build/gh-release-dl.sh /tmp/gh-release-dl.sh
 
-RUN <<EOR
+RUN --mount=type=secret,id=github_token,required=false <<EOR
 set -eu
-gh=https://github.com
 m=/out/manifests
 mkdir -p /out/bin /out/images/cplane /out/images/node
 echo "${KUBEVIRT_VERSION}" > /out/kubevirt-version
 
 # virtctl
-curl -fsSL --retry 10 --retry-all-errors --retry-delay 10 --connect-timeout 30 -o /out/bin/virtctl \
-  "$gh/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/virtctl-${KUBEVIRT_VERSION}-linux-amd64"
+sh /tmp/gh-release-dl.sh kubevirt/kubevirt "${KUBEVIRT_VERSION}" \
+  "virtctl-${KUBEVIRT_VERSION}-linux-amd64" /out/bin/virtctl
 chmod 0755 /out/bin/virtctl
 
 # KubeVirt operator, with 1 replica instead of 2.
-curl -fsSL --retry 10 --retry-all-errors --retry-delay 10 --connect-timeout 30 -o "$m/10-kubevirt-operator.yaml" \
-  "$gh/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/kubevirt-operator.yaml"
+sh /tmp/gh-release-dl.sh kubevirt/kubevirt "${KUBEVIRT_VERSION}" \
+  kubevirt-operator.yaml "$m/10-kubevirt-operator.yaml"
 yq -i '(select(.kind == "Deployment" and .metadata.name == "virt-operator") | .spec.replicas) = 1' \
   "$m/10-kubevirt-operator.yaml"
 
 # CDI (Containerized Data Importer): imports VM disk images into PVCs, using
 # K3s' default local-path StorageClass. The operator is pinned to the K3s
 # server, where its image is preloaded. 40-cdi-cr.yaml pins the rest of CDI.
-curl -fsSL --retry 10 --retry-all-errors --retry-delay 10 --connect-timeout 30 -o "$m/30-cdi-operator.yaml" \
-  "$gh/kubevirt/containerized-data-importer/releases/download/${CDI_VERSION}/cdi-operator.yaml"
+sh /tmp/gh-release-dl.sh kubevirt/containerized-data-importer "${CDI_VERSION}" \
+  cdi-operator.yaml "$m/30-cdi-operator.yaml"
 yq -i '(select(.kind == "Deployment" and .metadata.name == "cdi-operator") | .spec.template.spec.nodeSelector["node-role.kubernetes.io/control-plane"]) = "true"' \
   "$m/30-cdi-operator.yaml"
 
