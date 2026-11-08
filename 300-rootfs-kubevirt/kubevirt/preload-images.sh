@@ -5,7 +5,8 @@
 #
 # Each image is pulled once into a pool, then hard-linked into the folder of
 # every node role that needs it. A failed pull only prints a warning: that
-# image is then pulled at runtime instead.
+# image is then pulled at runtime instead. Each pull is tried 3 times, since a
+# registry connection can drop in the middle of a large layer.
 #
 # Usage: CPLANE_IMAGES="<ref> ..." NODE_IMAGES="<ref> ..." preload-images.sh <out-dir>
 set -u
@@ -23,10 +24,19 @@ tarball() {
 for ref in $CPLANE_IMAGES $NODE_IMAGES; do
   file="${pool}/$(tarball "$ref")"
   [ -f "$file" ] && continue
-  if crane pull --platform linux/amd64 "$ref" "$file"; then
+  ok=false
+  for attempt in 1 2 3; do
+    if crane pull --platform linux/amd64 "$ref" "$file"; then
+      ok=true
+      break
+    fi
+    rm -f "$file"
+    echo "pull of ${ref} failed (attempt ${attempt} of 3)"
+    sleep 3
+  done
+  if [ "$ok" = true ]; then
     echo "preloaded ${ref}"
   else
-    rm -f "$file"
     echo "WARNING: could not preload ${ref}, it will be pulled at runtime"
   fi
 done

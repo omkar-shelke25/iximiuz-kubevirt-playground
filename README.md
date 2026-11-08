@@ -6,7 +6,7 @@ The layout matches the official iximiuz `k3s` playground: one dev machine with D
 
 | Machine | IP | Image | Role |
 |---|---|---|---|
-| `dev-machine` | 172.16.0.5 | `ghcr.io/omkar-shelke25/kubevirt-playground:dev-machine` | Docker, kubectl, virtctl, helm, k9s, code-server. No K3s. |
+| `dev-machine` | 172.16.0.5 | `ghcr.io/omkar-shelke25/kubevirt-playground:dev-machine` | Build machine: Docker, Packer, QEMU, kubectl, virtctl, helm, k9s, code-server. No K3s. |
 | `cplane-01` | 172.16.0.2 | `ghcr.io/omkar-shelke25/kubevirt-playground:cplane` | K3s server, KubeVirt and CDI control plane, KubeVirt Manager UI, can also run VMs |
 | `node-01` | 172.16.0.3 | `ghcr.io/omkar-shelke25/kubevirt-playground:node` | K3s agent, runs VMs |
 | `node-02` | 172.16.0.4 | `ghcr.io/omkar-shelke25/kubevirt-playground:node` | K3s agent, runs VMs |
@@ -34,7 +34,12 @@ The layout matches the official iximiuz `k3s` playground: one dev machine with D
     │   └── selinuxfs-unmount.service # runs the workaround before K3s starts
     └── dev-machine/
         ├── testvm.yaml               # CirrOS test VM, copied to ~/testvm.yaml
-        └── welcome                   # login banner
+        ├── welcome                   # login banner
+        ├── vm-image                  # deploys a Packer-built disk image to KubeVirt through CDI
+        └── packer/                   # example templates, copied to ~/packer
+            ├── cirros/               # QEMU builder, builds in minutes
+            ├── ubuntu/               # QEMU builder, Ubuntu 24.04, 10 to 20 minutes
+            └── docker/               # Docker builder, container image
 ```
 
 ## How the images are built
@@ -47,12 +52,14 @@ Each target builds `FROM` the matching official iximiuz rootfs, so K3s, the clus
 | `node` | `ghcr.io/iximiuz/labs/rootfs:ubuntu-k3s-agent` | `k3s agent` joining `https://172.16.0.2:6443`, enabled at boot |
 | `dev-machine` | `ghcr.io/iximiuz/labs/rootfs:ubuntu-k3s-dev-machine` | Docker CE with buildx and compose, nerdctl, kubectl, helm, k9s, krew, kexp. Copies the kubeconfig from `cplane-01` over SSH at boot. |
 
-Two helper stages run once and feed all three targets:
+Helper stages run once and feed the targets:
 
-| Stage | Produces |
-|---|---|
-| `tools` | Terminal binaries from GitHub releases |
-| `kubevirt` | `virtctl`, the KubeVirt, CDI, and KubeVirt Manager manifests, and preloaded image tarballs |
+| Stage | Produces | Used by |
+|---|---|---|
+| `tools` | Terminal binaries from GitHub releases | all three |
+| `kubevirt` | `virtctl`, the KubeVirt, CDI, and KubeVirt Manager manifests, and preloaded image tarballs | all three |
+| `packer-bin` | The `packer` binary, from the official `hashicorp/packer` image | `dev-machine` |
+| `packer` | The Packer QEMU and Docker plugins, installed with Packer's checksum check | `dev-machine` |
 
 What each target adds on top of its base:
 
@@ -62,7 +69,8 @@ What each target adds on top of its base:
 | Preloaded images | 13 (see below) | 4 | |
 | `selinuxfs-unmount.service` | Before `k3s.service` | Before `k3s-agent.service` | |
 | `virtctl` | Yes | | Yes |
-| `novnc`, `websockify`, `vm-vnc` | Yes | | Yes |
+| `novnc`, `websockify`, `vm-vnc` | | | Yes |
+| Packer, QEMU, `xorriso`, `ovmf`, `vm-image`, `~/packer` | | | Yes |
 | Tokyo Night terminal | Yes | Yes | Yes |
 | code-server theme and Kubernetes extensions | | | Yes |
 | `~/testvm.yaml` and welcome banner | | | Yes |
@@ -73,7 +81,7 @@ K3s applies every YAML file in `/var/lib/rancher/k3s/server/manifests/` when the
 
 | File | Source | Changes from upstream |
 |---|---|---|
-| `10-kubevirt-operator.yaml` | KubeVirt `v1.9.0` release | `virt-operator` at 1 replica |
+| `10-kubevirt-operator.yaml` | KubeVirt `v1.9.1` release | `virt-operator` at 1 replica |
 | `20-kubevirt-cr.yaml` | This repo | `useEmulation: true`, `infra.replicas: 1` |
 | `30-cdi-operator.yaml` | CDI `v1.66.1` release | `cdi-operator` pinned to the K3s server |
 | `40-cdi-cr.yaml` | This repo | CDI infra pods pinned to the K3s server, `HonorWaitForFirstConsumer` on |
@@ -141,7 +149,7 @@ could not retrieve pid 22479 selinux label: getxattr /proc/22479/attr/current: o
 
 ## VM screen in the browser
 
-`vm-vnc` shows a VM's graphical console in a browser tab, with no VNC client needed. It's installed on `dev-machine` and `cplane-01`.
+`vm-vnc` shows a VM's graphical console in a browser tab, with no VNC client needed. It's installed on `dev-machine`.
 
 ```bash
 vm-vnc testvm
@@ -169,21 +177,62 @@ Then open the playground's **VM Screen** tab (port `6080` on `dev-machine`). Pre
 
 On `cplane-01` there is no tab for port 6080. Use the playground's port exposing option on `cplane-01` with port `6080` instead.
 
+## Build VM images with Packer
+
+`dev-machine` is a build machine. It has Packer, the Packer QEMU and Docker plugins, QEMU, `xorriso` (for `cd_files` seed disks), OVMF (for UEFI guests), and `vm-image`. The plugins are installed in the image, so `packer init` needs no download.
+
+Example templates are copied to `~/packer`:
+
+| Folder | Builder | Result | Time |
+|---|---|---|---|
+| `cirros` | `qemu` | Customized CirrOS `qcow2` disk | A few minutes |
+| `ubuntu` | `qemu` | Ubuntu 24.04 `qcow2` disk with nginx | 10 to 20 minutes |
+| `docker` | `docker` | Container image `packer-hello:1.0` | Seconds |
+
+Build a VM image and run it on KubeVirt:
+
+```bash
+cd ~/packer/cirros
+packer init .
+packer build .
+vm-image deploy output-cirros/cirros-custom.qcow2
+virtctl console cirros-custom
+```
+
+`vm-image deploy <image> [vm-name]` does three things:
+
+1. Serves only that image over HTTP from `dev-machine` while it runs.
+2. Creates a `VirtualMachine` with a CDI `DataVolume` whose source is that URL. CDI imports and converts the image into a `local-path` PVC. The VM also gets an empty cloud-init disk, so CirrOS and Ubuntu do not wait for a metadata service at boot. The PVC size is the image's virtual size plus 10 percent, rounded up to whole GiB.
+3. Waits for the import, stops the HTTP server, and leaves the VM running.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `NAMESPACE` | `default` | Namespace of the VM |
+| `MEMORY` | `512Mi` | Memory request of the VM |
+| `PORT` | `8000` | HTTP port used during the import |
+| `TIMEOUT` | `900` | Seconds to wait for the import |
+| `VM_IMAGE_HOST` | the `172.16.0.x` address | Address the cluster uses to reach `dev-machine` |
+
+> [!NOTE]
+> A playground has no `/dev/kvm`, so the templates set `accelerator = "tcg"` and QEMU emulates the CPU in software. This works, but full distros are slow to build and boot. On a host with KVM, use `accelerator = "kvm"`.
+
+The Docker builder uses the Docker engine on `dev-machine`, so the same tool builds container images too.
+
 ## Terminal
 
 Every machine gets the same terminal layout as the Rust and OpenTofu playgrounds, with the **Tokyo Night** theme, from `terminal/setup.sh`. zsh is the default shell for `laborant` and `root`, and bash still works with a plain starship prompt.
 
 | Tool | Version | Purpose |
 |---|---|---|
-| starship | 1.26.0 | Prompt: host, folder, git, **Kubernetes context (namespace)**, time, command duration, exit status |
+| starship | 1.27.0 | Prompt: host, folder, git, **Kubernetes context (namespace)**, time, command duration, exit status |
 | eza | 0.23.5 | `ls`, `ll`, `tree` |
 | bat | 0.26.1 | `cat` with syntax highlighting (built-in `Tokyo Night` theme), also used for man pages and `git diff` |
-| fd | 10.5.0 | File search, used by fzf |
+| fd | 10.5.2 | File search, used by fzf |
 | zoxide | 0.10.0 | `z <folder>` jumps to frequent folders |
-| atuin | 18.22.0 | `Ctrl+R` history search |
-| delta | 0.19.2 | `git diff` pager |
-| lazygit | 0.65.1 | `lg` |
-| fastfetch | 2.68.1 | System info at login: K3s and Docker versions, KubeVirt version and phase, running VM count |
+| atuin | 18.24.5 | `Ctrl+R` history search |
+| delta | 0.20.1 | `git diff` pager |
+| lazygit | 0.66.3 | `lg` |
+| fastfetch | 2.71.0 | System info at login: K3s and Docker versions, KubeVirt version and phase, running VM count |
 | zsh-autosuggestions, zsh-syntax-highlighting | Ubuntu packages | Suggestions and highlighting while typing |
 | tmux | Ubuntu package | Tokyo Night status bar |
 
@@ -213,11 +262,13 @@ Build arguments:
 
 | Argument | Default | Effect |
 |---|---|---|
-| `KUBEVIRT_VERSION` | `v1.9.0` | KubeVirt, virtctl, and preloaded image version |
+| `KUBEVIRT_VERSION` | `v1.9.1` | KubeVirt, virtctl, and preloaded image version |
 | `CDI_VERSION` | `v1.66.1` | CDI version |
 | `KUBEVIRT_MANAGER_VERSION` | `1.5.4` | KubeVirt Manager manifest and image version |
 | `KUBEVIRT_MANAGER_NODEPORT` | `30080` | NodePort for the web UI. Change the tab in `manifest.yaml` to match. |
 | `PRELOAD_IMAGES` | `true` | `false` skips image preloading. Images get much smaller, but the first boot waits on downloads. |
+| `PACKER_VERSION` | `1.16.2` | Packer, copied from the `hashicorp/packer` image |
+| `PACKER_QEMU_VERSION`, `PACKER_DOCKER_VERSION` | `1.1.8`, `1.1.5` | Packer plugin versions |
 | `STARSHIP_VERSION`, `EZA_VERSION`, `BAT_VERSION`, `FD_VERSION`, `ZOXIDE_VERSION`, `DELTA_VERSION`, `ATUIN_VERSION`, `LAZYGIT_VERSION`, `FASTFETCH_VERSION` | See the Terminal table | Terminal tool versions |
 | `CPLANE_BASE`, `NODE_BASE`, `DEV_BASE`, `BUILDER_BASE` | Official iximiuz rootfs images | Base images, for example to pin a specific iximiuz release |
 
@@ -228,7 +279,7 @@ Pushing to `main` with changes under `300-rootfs-kubevirt/` runs `.github/workfl
 | Tag | Example |
 |---|---|
 | Target | `ghcr.io/omkar-shelke25/kubevirt-playground:cplane` |
-| Target and KubeVirt version | `ghcr.io/omkar-shelke25/kubevirt-playground:cplane-v1.9.0` |
+| Target and KubeVirt version | `ghcr.io/omkar-shelke25/kubevirt-playground:cplane-v1.9.1` |
 | Target and commit | `ghcr.io/omkar-shelke25/kubevirt-playground:cplane-sha-<commit>` |
 
 > [!IMPORTANT]
@@ -257,7 +308,7 @@ Four init tasks run on `dev-machine` before the playground opens. The last three
 
 | Machine | CPU / RAM | Disk |
 |---|---|---|
-| `dev-machine` | 2 vCPU / 4 GiB | 30 GiB |
+| `dev-machine` | 4 vCPU / 6 GiB | 40 GiB |
 | `cplane-01` | 4 vCPU / 4 GiB | 30 GiB |
 | `node-01`, `node-02` | 2 vCPU / 4 GiB each | 30 GiB each |
 
@@ -350,3 +401,5 @@ You should see `selinuxfs unmounted (no SELinux policy loaded)`.
 ## Upgrade versions
 
 Change `KUBEVIRT_VERSION` in `.github/workflows/build-rootfs.yml` and push. All three images pick up the new operator manifest, `virtctl`, preloaded images, and test VM disk tag. `CDI_VERSION` and `KUBEVIRT_MANAGER_VERSION` work the same way, from the same `env` block.
+
+`PACKER_VERSION` works the same way. The Packer plugin versions are the `PACKER_QEMU_VERSION` and `PACKER_DOCKER_VERSION` defaults in the `Dockerfile`. The workflow passes the repository's `GITHUB_TOKEN` to the build as a secret, which only keeps Packer's plugin install clear of GitHub API rate limits.

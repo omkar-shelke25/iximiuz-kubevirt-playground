@@ -14,9 +14,10 @@ permissions:
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/kubevirt-playground
-  KUBEVIRT_VERSION: v1.9.0
+  KUBEVIRT_VERSION: v1.9.1
   CDI_VERSION: v1.66.1
   KUBEVIRT_MANAGER_VERSION: 1.5.4
+  PACKER_VERSION: 1.16.2
 
 jobs:
   build:
@@ -27,20 +28,20 @@ jobs:
         target: [cplane, node, dev-machine]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push ${{ matrix.target }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: 300-rootfs-kubevirt
           target: ${{ matrix.target }}
@@ -50,6 +51,9 @@ jobs:
             KUBEVIRT_VERSION=${{ env.KUBEVIRT_VERSION }}
             CDI_VERSION=${{ env.CDI_VERSION }}
             KUBEVIRT_MANAGER_VERSION=${{ env.KUBEVIRT_MANAGER_VERSION }}
+            PACKER_VERSION=${{ env.PACKER_VERSION }}
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
           tags: |
             ${{ env.IMAGE }}:${{ matrix.target }}
             ${{ env.IMAGE }}:${{ matrix.target }}-${{ env.KUBEVIRT_VERSION }}

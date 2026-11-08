@@ -1,138 +1,304 @@
 kind: playground
-name: kubevirt-k3s
+name: kubevirt-k3s-6fac2500
 base: flexbox
 title: KubeVirt on K3s
 description: Multi-node K3s cluster with KubeVirt, CDI and the KubeVirt Manager web UI preinstalled. Run virtual machines next to containers.
+cover: /content/files/playgrounds/kubevirt-k3s-6fac2500/__static__/kubevirt-stacked-color.svg?v=1791005419836
 categories:
-  - kubernetes
-markdown: |
-  A multi-node K3s cluster with KubeVirt preinstalled and ready to run virtual machines:
-  a dev machine with Docker, one control plane node, and two worker nodes.
+    - kubernetes
+markdown: |-
+    A multi-node K3s cluster with KubeVirt preinstalled, ready to run virtual machines next to containers.
 
-  iximiuz Labs playgrounds have no nested virtualization, so KubeVirt runs VMs with
-  QEMU software emulation. Small images such as CirrOS boot in seconds.
+    ## Machines
 
-  Included: K3s, KubeVirt, CDI, the KubeVirt Manager web UI, virtctl, kubectl, helm, k9s,
-  Docker, and a Tokyo Night zsh terminal on every machine.
+    | Machine | IP | Role |
+    | --- | --- | --- |
+    | `dev-machine` | `172.16.0.5` | Build machine and workstation with kubectl, virtctl, helm, k9s, Docker, Packer, QEMU, `vm-image` and `vm-vnc` |
+    | `cplane-01` | `172.16.0.2` | K3s control plane, KubeVirt Manager on port `30080` |
+    | `node-01` | `172.16.0.3` | K3s worker, runs VMs |
+    | `node-02` | `172.16.0.4` | K3s worker, runs VMs |
+
+    ## Included
+
+    K3s, KubeVirt, CDI, KubeVirt Manager, virtctl, kubectl, helm, k9s, Docker, noVNC, Packer with QEMU on `dev-machine`, and a Tokyo Night zsh terminal on every machine.
+
+    ## Components
+
+    | Component | Namespace | What it does |
+    | --- | --- | --- |
+    | `virt-operator` | `kubevirt` | Installs and manages the other KubeVirt components |
+    | `virt-api` | `kubevirt` | API entry point for VM actions, serial console and VNC |
+    | `virt-controller` | `kubevirt` | Creates a `virt-launcher` pod for every VM that starts |
+    | `virt-handler` | `kubevirt` | DaemonSet, one pod per node, runs and monitors the VMs on that node |
+    | `virt-launcher-<vm>` | VM's namespace | One pod per running VM, runs QEMU |
+    | `cdi-operator` | `cdi` | Installs and manages the other CDI components |
+    | `cdi-apiserver` | `cdi` | API for DataVolumes |
+    | `cdi-deployment` | `cdi` | Imports disk images into PVCs |
+    | `cdi-uploadproxy` | `cdi` | Receives local images from `virtctl image-upload` |
+    | `kubevirt-manager` | `kubevirt-manager` | Web UI behind the **KubeVirt Manager** tab |
+
+    ## Tabs
+
+    | Tab | Opens |
+    | --- | --- |
+    | **IDE** | VS Code on `dev-machine` |
+    | **Explorer** | Kubernetes resource explorer |
+    | **KubeVirt Manager** | Web UI to create, start, stop and inspect VMs |
+    | **VM Screen** | A VM's display in the browser (run `vm-vnc` first) |
+
+    ## Wait for the cluster
+
+    The playground opens once all three K3s nodes are `Ready`, but KubeVirt, CDI and KubeVirt Manager keep starting in the background for a few more minutes. Run these on `dev-machine` before creating any VM. Each command returns as soon as its component is ready.
+
+    Nodes:
+
+    ```bash
+    kubectl get nodes
+    ```
+
+    All three nodes must show `Ready`.
+
+    KubeVirt:
+
+    ```bash
+    kubectl -n kubevirt wait kv kubevirt --for condition=Available --timeout=10m
+    ```
+
+    CDI:
+
+    ```bash
+    kubectl -n cdi wait cdi cdi --for condition=Available --timeout=10m
+    ```
+
+    KubeVirt Manager:
+
+    ```bash
+    kubectl -n kubevirt-manager rollout status deployment kubevirt-manager --timeout=10m
+    ```
+
+    To see every component pod at once:
+
+    ```bash
+    kubectl get pods -n kubevirt -o wide
+    ```
+
+    ```bash
+    kubectl get pods -n cdi
+    ```
+
+    All pods must be `Running` with every container ready (for example `1/1`).
+
+    ## Quick start
+
+    From `dev-machine`, create and start a small test VM:
+
+    ```bash
+    kubectl apply -f https://kubevirt.io/labs/manifests/vm.yaml
+    ```
+
+    ```bash
+    virtctl start testvm
+    ```
+
+    ```bash
+    kubectl get vmi testvm -w
+    ```
+
+    Wait for `PHASE Running` and `READY True`, then press `Ctrl+C`.
+
+    Serial console (exit with `Ctrl+]`):
+
+    ```bash
+    virtctl console testvm
+    ```
+
+    ## VM screen in the browser (VNC)
+
+    One command on `dev-machine`, with the VM running:
+
+    ```bash
+    vm-vnc testvm
+    ```
+
+    Then open the **VM Screen** tab. Press `Ctrl+C` in the terminal to stop.
+
+    For a VM in another namespace:
+
+    ```bash
+    vm-vnc testvm my-namespace
+    ```
+
+    `vm-vnc` does everything for you. It starts the KubeVirt VNC proxy and the browser bridge, and restarts the proxy after every session so reloading the tab reconnects. You never run `virtctl vnc` or `websockify` by hand.
+
+    `vm-vnc` stays in the foreground. Leave it running in one terminal tab and use another `dev-machine` terminal for other work.
+
+    ### Rules
+
+    - A VM accepts only one VNC session at a time. Do not run `virtctl vnc` by hand while `vm-vnc` is running, or the two keep disconnecting each other.
+    - Run one `vm-vnc` at a time. To switch VMs, press `Ctrl+C` and run `vm-vnc` with the other VM name.
+    - Cloud images such as CirrOS and AlmaLinux show a text login prompt, not a desktop. If the screen is black, click inside it and press `Enter`.
+
+    ### Troubleshooting
+
+    | Symptom | Fix |
+    | --- | --- |
+    | `kubectl wait` times out | Check the pods with `kubectl get pods -n kubevirt` and `kubectl get pods -n cdi`, then `kubectl describe pod <name> -n <namespace>` for the one that is not ready |
+    | `VM default/testvm is not running` | Run `virtctl start testvm` and wait for `READY True` |
+    | **VM Screen** tab shows an error page | `vm-vnc` is not running. Run it on `dev-machine` |
+    | Screen connects, then drops right away | Another VNC session holds the VM. Run `pkill -f 'virtctl vnc'`, then `vm-vnc` again |
+    | `Address already in use` on port `6080` | An old bridge is still running. Run `pkill websockify`, then `vm-vnc` again |
+    | Black screen | Click inside the screen and press `Enter` |
+
+    ## Build VM images with Packer
+
+    `dev-machine` is also a build machine. It has Packer with the QEMU and Docker plugins, QEMU, and `vm-image`, which imports a built disk into KubeVirt through CDI and starts a VM from it. Example templates are in `~/packer`.
+
+    ```bash
+    cd ~/packer/cirros
+    packer init .
+    packer build .
+    ```
+
+    Deploy the built image as a VM:
+
+    ```bash
+    vm-image deploy output-cirros/cirros-custom.qcow2
+    ```
+
+    ```bash
+    virtctl console cirros-custom
+    ```
+
+    Log in as `cirros` with password `gocubsgo`, then run `cat built-by-packer.txt`. Leave the console with `Ctrl+]`.
+
+    There is no KVM here, so QEMU builds use software emulation. CirrOS builds in a few minutes. `~/packer/ubuntu` builds an Ubuntu 24.04 image and takes 10 to 20 minutes. `~/packer/docker` builds a container image with the same tool.
+
+    ## Limitations
+
+    iximiuz Labs playgrounds have no nested virtualization, so KubeVirt runs VMs with QEMU software emulation. Small images such as CirrOS boot in seconds, full distros take a few minutes.
+
+    `containerDisk` volumes are ephemeral. Anything written inside the VM is lost on every VM restart. Use a DataVolume on the `local-path` storage class for persistence.
 playground:
-  networks:
-    - name: local
-      subnet: 172.16.0.0/24
-  machines:
-    - name: dev-machine
-      users:
-        - name: root
-        - name: laborant
-          default: true
-      drives:
-        - source: oci://ghcr.io/omkar-shelke25/kubevirt-playground:dev-machine
-          mount: /
-          size: 30GiB
-      network:
-        interfaces:
-          - network: local
-            address: 172.16.0.5/24
-      resources:
-        cpuCount: 2
-        ramSize: 4GiB
-    - name: cplane-01
-      users:
-        - name: root
-        - name: laborant
-          default: true
-      drives:
-        - source: oci://ghcr.io/omkar-shelke25/kubevirt-playground:cplane
-          mount: /
-          size: 30GiB
-      network:
-        interfaces:
-          - network: local
-            address: 172.16.0.2/24
-      resources:
-        cpuCount: 4
-        ramSize: 4GiB
-    - name: node-01
-      users:
-        - name: root
-        - name: laborant
-          default: true
-      drives:
-        - source: oci://ghcr.io/omkar-shelke25/kubevirt-playground:node
-          mount: /
-          size: 30GiB
-      network:
-        interfaces:
-          - network: local
-            address: 172.16.0.3/24
-      resources:
-        cpuCount: 2
-        ramSize: 4GiB
-    - name: node-02
-      users:
-        - name: root
-        - name: laborant
-          default: true
-      drives:
-        - source: oci://ghcr.io/omkar-shelke25/kubevirt-playground:node
-          mount: /
-          size: 30GiB
-      network:
-        interfaces:
-          - network: local
-            address: 172.16.0.4/24
-      resources:
-        cpuCount: 2
-        ramSize: 4GiB
-  tabs:
-    - id: ide-dev-machine
-      kind: ide
-      name: IDE
-      machine: dev-machine
-    - id: kexp-dev-machine
-      kind: kexp
-      name: Explorer
-      machine: dev-machine
-    - id: kubevirt-manager
-      kind: http-port
-      name: KubeVirt Manager
-      machine: cplane-01
-      number: 30080
-    - id: vm-screen
-      kind: http-port
-      name: VM Screen
-      machine: dev-machine
-      number: 6080
-    - id: terminal-dev-machine
-      kind: terminal
-      name: dev-machine
-      machine: dev-machine
-    - id: terminal-cplane-01
-      kind: terminal
-      name: cplane-01
-      machine: cplane-01
-    - id: terminal-node-01
-      kind: terminal
-      name: node-01
-      machine: node-01
-    - id: terminal-node-02
-      kind: terminal
-      name: node-02
-      machine: node-02
-  initTasks:
-    init_wait_nodes:
-      init: true
-      machine: dev-machine
-      user: root
-      timeout_seconds: 300
-      run: |
-        export KUBECONFIG=/root/.kube/config
-        until [ "$(kubectl get nodes --no-headers 2>/dev/null | grep -cw Ready)" -eq 3 ]; do
-          sleep 5
-        done
-  accessControl:
-    canList:
-      - owner
-    canRead:
-      - owner
-    canStart:
-      - owner
+    networks:
+        - name: local
+          subnet: 172.16.0.0/24
+    machines:
+        - name: dev-machine
+          users:
+            - name: root
+            - name: laborant
+              default: true
+          drives:
+            - source: oci://ghcr.io/omkar-shelke25/kubevirt-playground:dev-machine
+              mount: /
+              size: 40GiB
+          network:
+            interfaces:
+                - address: 172.16.0.5/24
+                  network: local
+          resources:
+            cpuCount: 4
+            ramSize: 6GiB
+        - name: cplane-01
+          users:
+            - name: root
+            - name: laborant
+              default: true
+          drives:
+            - source: oci://ghcr.io/omkar-shelke25/kubevirt-playground:cplane
+              mount: /
+              size: 30GiB
+          network:
+            interfaces:
+                - address: 172.16.0.2/24
+                  network: local
+          resources:
+            cpuCount: 4
+            ramSize: 4GiB
+        - name: node-01
+          users:
+            - name: root
+            - name: laborant
+              default: true
+          drives:
+            - source: oci://ghcr.io/omkar-shelke25/kubevirt-playground:node
+              mount: /
+              size: 30GiB
+          network:
+            interfaces:
+                - address: 172.16.0.3/24
+                  network: local
+          resources:
+            cpuCount: 2
+            ramSize: 4GiB
+        - name: node-02
+          users:
+            - name: root
+            - name: laborant
+              default: true
+          drives:
+            - source: oci://ghcr.io/omkar-shelke25/kubevirt-playground:node
+              mount: /
+              size: 30GiB
+          network:
+            interfaces:
+                - address: 172.16.0.4/24
+                  network: local
+          resources:
+            cpuCount: 2
+            ramSize: 4GiB
+    tabs:
+        - id: ide-dev-machine
+          kind: ide
+          name: IDE
+          machine: dev-machine
+        - id: kexp-dev-machine
+          kind: kexp
+          name: Explorer
+          machine: dev-machine
+        - id: kubevirt-manager
+          kind: http-port
+          name: KubeVirt Manager
+          machine: cplane-01
+          number: 30080
+        - id: vm-screen
+          kind: http-port
+          name: VM Screen
+          machine: dev-machine
+          number: 6080
+        - id: terminal-dev-machine
+          kind: terminal
+          name: dev-machine
+          machine: dev-machine
+        - id: terminal-cplane-01
+          kind: terminal
+          name: cplane-01
+          machine: cplane-01
+        - id: terminal-node-01
+          kind: terminal
+          name: node-01
+          machine: node-01
+        - id: terminal-node-02
+          kind: terminal
+          name: node-02
+          machine: node-02
+    initTasks:
+        init_wait_nodes:
+            name: init_wait_nodes
+            machine: dev-machine
+            init: true
+            user: root
+            timeout_seconds: 300
+            run: |
+                export KUBECONFIG=/root/.kube/config
+                until [ "$(kubectl get nodes --no-headers 2>/dev/null | grep -cw Ready)" -eq 3 ]; do
+                  sleep 5
+                done
+    initConditions: {}
+    accessControl:
+        canList:
+            - anyone
+        canRead:
+            - anyone
+        canStart:
+            - anyone

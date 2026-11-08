@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+#
+# vm-image: deploy a disk image built with Packer to KubeVirt.
+#
+#   vm-image deploy <image.qcow2> [vm-name]
+#
+# What it does:
+#   1. Serves the image over HTTP from this machine (python3, only that file).
+#   2. Creates a VirtualMachine with a CDI DataVolume that imports the image
+#      from that URL into a PVC (CDI converts qcow2 to raw), plus an empty
+#      cloud-init disk.
+#   3. Waits for the import, stops the HTTP server, and leaves the VM running.
+#
+# Options (environment variables):
+#   NAMESPACE   namespace for the VM                          (default: default)
+#   MEMORY      memory request of the VM                      (default: 512Mi)
+#   PORT        HTTP port used while importing                (default: 8000)
+#   TIMEOUT     seconds to wait for the import                (default: 900)
+#   VM_IMAGE_HOST  address the cluster uses to reach this machine
+#                  (default: this machine's 172.16.0.x address)
+
+set -euo pipefail
+
+usage() {
+  echo "usage: vm-image deploy <image.qcow2> [vm-name]"
+  exit 1
+}
+
+[ "${1:-}" = "deploy" ] || usage
+img="${2:-}"
+[ -n "$img" ] || usage
+[ -f "$img" ] || { echo "vm-image: ${img} not found"; exit 1; }
+
+namespace="${NAMESPACE:-default}"
+memory="${MEMORY:-512Mi}"
+port="${PORT:-8000}"
+timeout="${TIMEOUT:-900}"
+
+base="$(basename "$img")"
+name="${3:-${base%.*}}"
+# VM names must be DNS labels: lowercase letters, digits and dashes.
+name="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n-' '-' | sed 's/^-*//;s/-*$//' | cut -c1-40)"
+[ -n "$name" ] || { echo "vm-image: could not derive a VM name, pass one"; exit 1; }
+
+host="${VM_IMAGE_HOST:-$(ip -4 -o addr show | awk '{print $4}' | cut -d/ -f1 | grep '^172\.16\.0\.' | head -1)}"
+[ -n "$host" ] || { echo "vm-image: no 172.16.0.x address found, set VM_IMAGE_HOST"; exit 1; }
+
+# The PVC must hold the virtual disk size plus CDI's filesystem overhead.
+virtual="$(qemu-img info --output json "$img" | jq -r '."virtual-size"')"
+gi=$((1024 * 1024 * 1024))
+size="$(( (virtual * 11 / 10 + gi - 1) / gi ))Gi"
+
+if kubectl -n "$namespace" get vm "$name" >/dev/null 2>&1; then
+  echo "vm-image: VM ${namespace}/${name} already exists."
+  echo "Delete it first: kubectl -n ${namespace} delete vm ${name}"
+  exit 1
+fi
+
+# Serve only the one image: a temporary folder holding a symlink to it.
+serve_dir="$(mktemp -d)"
+ln -s "$(realpath "$img")" "${serve_dir}/${base}"
+python3 -m http.server "$port" --bind 0.0.0.0 --directory "$serve_dir" >/dev/null 2>&1 &
+server_pid=$!
+trap 'kill "$server_pid" 2>/dev/null || true; rm -rf "$serve_dir"' EXIT
+
+url="http://${host}:${port}/${base}"
+echo "Serving ${base} at ${url}"
+echo "Creating VM ${namespace}/${name} (disk ${size}, memory ${memory})"
+
+kubectl -n "$namespace" apply -f - <<EOF
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: ${name}
+spec:
+  runStrategy: Always
+  dataVolumeTemplates:
+  - metadata:
+      name: ${name}
+    spec:
+      source:
+        http:
+          url: ${url}
+      storage:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: ${size}
+  template:
+    metadata:
+      labels:
+        kubevirt.io/vm: ${name}
+    spec:
+      domain:
+        devices:
+          disks:
+          - name: rootdisk
+            disk:
+              bus: virtio
+          - name: cloudinitdisk
+            disk:
+              bus: virtio
+          interfaces:
+          - name: default
+            masquerade: {}
+        resources:
+          requests:
+            memory: ${memory}
+      networks:
+      - name: default
+        pod: {}
+      volumes:
+      - name: rootdisk
+        dataVolume:
+          name: ${name}
+      # An empty cloud-init disk, so images such as CirrOS and Ubuntu do not
+      # wait for a metadata service at boot.
+      - name: cloudinitdisk
+        cloudInitNoCloud:
+          userData: |
+            #cloud-config
+EOF
+
+echo "Waiting for CDI to import the image (up to ${timeout}s)..."
+deadline=$((SECONDS + timeout))
+phase=""
+while [ "$SECONDS" -lt "$deadline" ]; do
+  phase="$(kubectl -n "$namespace" get dv "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+  progress="$(kubectl -n "$namespace" get dv "$name" -o jsonpath='{.status.progress}' 2>/dev/null || true)"
+  note=""
+  if [ -z "$phase" ]; then
+    note="$(kubectl -n "$namespace" get dv "$name" -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' 2>/dev/null || true)"
+  fi
+  echo "  datavolume: ${phase:-pending} ${progress} ${note}"
+  case "$phase" in
+    Succeeded) break ;;
+    Failed) echo "vm-image: import failed. See: kubectl -n ${namespace} describe dv ${name}"; exit 1 ;;
+  esac
+  sleep 5
+done
+if [ "$phase" != "Succeeded" ]; then
+  echo "vm-image: import did not finish in ${timeout}s. See: kubectl -n ${namespace} describe dv ${name}"
+  exit 1
+fi
+
+echo
+echo "Image imported, the HTTP server is stopped. The VM is starting:"
+echo "  kubectl -n ${namespace} get vmi ${name} -o wide"
+echo "  virtctl console ${name} -n ${namespace}     (leave with Ctrl+])"
+echo "  vm-vnc ${name} ${namespace}                 (screen in the VM Screen tab)"
