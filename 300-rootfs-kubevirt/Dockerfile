@@ -6,7 +6,8 @@
 #   --target cplane       K3s server at 172.16.0.2, applies KubeVirt, CDI and
 #                         KubeVirt Manager at boot
 #   --target node         K3s agent, joins 172.16.0.2
-#   --target dev-machine  Docker, kubectl, virtctl, code-server (no K3s)
+#   --target dev-machine  Docker, kubectl, virtctl, Packer + QEMU, code-server
+#                         (no K3s): the build machine
 #
 # Each target builds on the matching official iximiuz rootfs, so K3s, the join
 # token, sshd, the laborant user and the kubeconfig setup come from there.
@@ -17,6 +18,10 @@ ARG CPLANE_BASE=ghcr.io/iximiuz/labs/rootfs:ubuntu-k3s-server
 ARG NODE_BASE=ghcr.io/iximiuz/labs/rootfs:ubuntu-k3s-agent
 ARG DEV_BASE=ghcr.io/iximiuz/labs/rootfs:ubuntu-k3s-dev-machine
 ARG BUILDER_BASE=ghcr.io/iximiuz/labs/rootfs:ubuntu-k3s-bare
+ARG PACKER_VERSION=1.16.2
+
+# Packer is a static Go binary. Copy it from the official image.
+FROM hashicorp/packer:${PACKER_VERSION} AS packer-bin
 
 # =============================================================================
 # Stage: tools
@@ -24,15 +29,15 @@ ARG BUILDER_BASE=ghcr.io/iximiuz/labs/rootfs:ubuntu-k3s-bare
 # =============================================================================
 FROM ${BUILDER_BASE} AS tools
 
-ARG STARSHIP_VERSION=1.26.0
+ARG STARSHIP_VERSION=1.27.0
 ARG EZA_VERSION=0.23.5
 ARG BAT_VERSION=0.26.1
-ARG FD_VERSION=10.5.0
+ARG FD_VERSION=10.5.2
 ARG ZOXIDE_VERSION=0.10.0
-ARG DELTA_VERSION=0.19.2
-ARG ATUIN_VERSION=18.22.0
-ARG LAZYGIT_VERSION=0.65.1
-ARG FASTFETCH_VERSION=2.68.1
+ARG DELTA_VERSION=0.20.1
+ARG ATUIN_VERSION=18.24.5
+ARG LAZYGIT_VERSION=0.66.3
+ARG FASTFETCH_VERSION=2.71.0
 
 USER root
 ENV HOME=/root
@@ -73,7 +78,7 @@ EOR
 # =============================================================================
 FROM ${BUILDER_BASE} AS kubevirt
 
-ARG KUBEVIRT_VERSION=v1.9.0
+ARG KUBEVIRT_VERSION=v1.9.1
 ARG CDI_VERSION=v1.66.1
 ARG KUBEVIRT_MANAGER_VERSION=1.5.4
 ARG KUBEVIRT_MANAGER_NODEPORT=30080
@@ -156,6 +161,35 @@ sh /tmp/preload-images.sh /out/images
 EOR
 
 # =============================================================================
+# Stage: packer
+# Packer plugins, installed at build time so `packer init` works in the
+# playground without waiting on GitHub. Packer checks each plugin's checksum.
+# A GitHub token (build secret github_token) only avoids API rate limits.
+# =============================================================================
+FROM ${BUILDER_BASE} AS packer
+
+ARG PACKER_QEMU_VERSION=1.1.8
+ARG PACKER_DOCKER_VERSION=1.1.5
+
+USER root
+ENV HOME=/root
+
+COPY --from=packer-bin /bin/packer /usr/local/bin/packer
+
+RUN --mount=type=secret,id=github_token,required=false <<EOR
+set -eu
+export HOME=/opt/packer-home
+mkdir -p "$HOME"
+if [ -s /run/secrets/github_token ]; then
+  PACKER_GITHUB_API_TOKEN="$(cat /run/secrets/github_token)"
+  export PACKER_GITHUB_API_TOKEN
+fi
+packer plugins install github.com/hashicorp/qemu "${PACKER_QEMU_VERSION}"
+packer plugins install github.com/hashicorp/docker "${PACKER_DOCKER_VERSION}"
+packer plugins installed
+EOR
+
+# =============================================================================
 # Target: cplane (K3s server)
 # =============================================================================
 FROM ${CPLANE_BASE} AS cplane
@@ -169,15 +203,6 @@ COPY --from=tools /opt/tools/bin/ /usr/local/bin/
 COPY --from=tools /opt/fastfetch/ /usr/local/
 COPY --from=kubevirt /out/bin/virtctl /usr/local/bin/virtctl
 COPY --from=kubevirt /out/kubevirt-version /etc/kubevirt-version
-
-# Browser VNC: noVNC + websockify from Ubuntu, and vm-vnc to connect them to
-# `virtctl vnc --proxy-only`. Run `vm-vnc <vm>`, then open port 6080.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends novnc websockify \
-    && rm -rf /var/lib/apt/lists/*
-COPY vnc/vm-vnc /usr/local/bin/vm-vnc
-COPY vnc/index.html /usr/share/novnc/index.html
-RUN chmod 0755 /usr/local/bin/vm-vnc && websockify --help >/dev/null && test -f /usr/share/novnc/vnc.html
 
 # K3s applies every file in this folder at boot, in file name order,
 # and retries until each one succeeds.
@@ -257,14 +282,30 @@ COPY --from=tools /opt/fastfetch/ /usr/local/
 COPY --from=kubevirt /out/bin/virtctl /usr/local/bin/virtctl
 COPY --from=kubevirt /out/kubevirt-version /etc/kubevirt-version
 
-# Browser VNC: noVNC + websockify from Ubuntu, and vm-vnc to connect them to
+# Build machine: Packer, QEMU and an ISO tool for cd_files. Ubuntu's QEMU needs
+# ipxe-qemu for virtio NIC ROMs and ovmf for UEFI guests.
+COPY --from=packer-bin /bin/packer /usr/local/bin/packer
+
+# Browser VNC: noVNC + websockify, and vm-vnc to connect them to
 # `virtctl vnc --proxy-only`. Run `vm-vnc <vm>`, then open port 6080.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends novnc websockify \
+    && apt-get install -y --no-install-recommends \
+         novnc websockify \
+         qemu-system-x86 qemu-utils ipxe-qemu ovmf xorriso \
     && rm -rf /var/lib/apt/lists/*
 COPY vnc/vm-vnc /usr/local/bin/vm-vnc
 COPY vnc/index.html /usr/share/novnc/index.html
-RUN chmod 0755 /usr/local/bin/vm-vnc && websockify --help >/dev/null && test -f /usr/share/novnc/vnc.html
+# vm-image deploys a Packer-built disk image to KubeVirt through CDI.
+COPY dev-machine/vm-image /usr/local/bin/vm-image
+RUN chmod 0755 /usr/local/bin/vm-vnc /usr/local/bin/vm-image \
+    && websockify --help >/dev/null && test -f /usr/share/novnc/vnc.html \
+    && packer version && qemu-system-x86_64 --version | head -n1 \
+    && qemu-img --version | head -n1 && xorriso -version 2>&1 | head -n1
+
+# Packer plugins live in the default plugin folder of the lab user.
+RUN install -d -o ${LAB_USER} -g ${LAB_USER} \
+      /home/${LAB_USER}/.config /home/${LAB_USER}/.config/packer
+COPY --from=packer --chown=${LAB_USER}:${LAB_USER} /opt/packer-home/.config/packer/plugins/ /home/${LAB_USER}/.config/packer/plugins/
 
 RUN --mount=type=bind,source=terminal,target=/tmp/terminal \
     LAB_USER=${LAB_USER} bash /tmp/terminal/setup.sh
@@ -274,10 +315,12 @@ RUN docker --version && virtctl version --client
 USER $LAB_USER
 ENV HOME=/home/$LAB_USER
 
+RUN packer plugins installed | grep -q qemu && packer plugins installed | grep -q docker
+
 # code-server extensions. A missing extension only prints a warning.
 RUN <<EOR
 set -u
-for ext in enkia.tokyo-night redhat.vscode-yaml ms-kubernetes-tools.vscode-kubernetes-tools; do
+for ext in enkia.tokyo-night redhat.vscode-yaml ms-kubernetes-tools.vscode-kubernetes-tools hashicorp.hcl; do
   code-server --install-extension "$ext" || echo "WARNING: could not install ${ext}"
 done
 EOR
@@ -325,4 +368,5 @@ RUN zsh -ic 'exit' && rm -f "$HOME"/.zcompdump*
 
 COPY --chown=${LAB_USER}:${LAB_USER} dev-machine/welcome $HOME/.welcome
 COPY --chown=${LAB_USER}:${LAB_USER} dev-machine/testvm.yaml $HOME/testvm.yaml
+COPY --chown=${LAB_USER}:${LAB_USER} dev-machine/packer/ $HOME/packer/
 RUN sed -i "s/KUBEVIRT_VERSION/$(cat /etc/kubevirt-version)/" $HOME/testvm.yaml
