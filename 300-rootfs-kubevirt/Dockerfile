@@ -49,24 +49,25 @@ musl=x86_64-unknown-linux-musl
 bin=/opt/tools/bin
 mkdir -p "$bin" /opt/fastfetch
 
-curl -fsSL --retry 5 --retry-delay 3 "$gh/starship/starship/releases/download/v${STARSHIP_VERSION}/starship-${musl}.tar.gz" \
-  | tar -xz --no-same-owner -C "$bin" starship
-curl -fsSL --retry 5 --retry-delay 3 "$gh/eza-community/eza/releases/download/v${EZA_VERSION}/eza_${musl}.tar.gz" \
-  | tar -xz --no-same-owner -C "$bin" ./eza
-curl -fsSL --retry 5 --retry-delay 3 "$gh/sharkdp/bat/releases/download/v${BAT_VERSION}/bat-v${BAT_VERSION}-${musl}.tar.gz" \
-  | tar -xz --no-same-owner --strip-components=1 -C "$bin" "bat-v${BAT_VERSION}-${musl}/bat"
-curl -fsSL --retry 5 --retry-delay 3 "$gh/sharkdp/fd/releases/download/v${FD_VERSION}/fd-v${FD_VERSION}-${musl}.tar.gz" \
-  | tar -xz --no-same-owner --strip-components=1 -C "$bin" "fd-v${FD_VERSION}-${musl}/fd"
-curl -fsSL --retry 5 --retry-delay 3 "$gh/ajeetdsouza/zoxide/releases/download/v${ZOXIDE_VERSION}/zoxide-${ZOXIDE_VERSION}-${musl}.tar.gz" \
-  | tar -xz --no-same-owner -C "$bin" zoxide
-curl -fsSL --retry 5 --retry-delay 3 "$gh/dandavison/delta/releases/download/${DELTA_VERSION}/delta-${DELTA_VERSION}-${musl}.tar.gz" \
-  | tar -xz --no-same-owner --strip-components=1 -C "$bin" "delta-${DELTA_VERSION}-${musl}/delta"
-curl -fsSL --retry 5 --retry-delay 3 "$gh/atuinsh/atuin/releases/download/v${ATUIN_VERSION}/atuin-${musl}.tar.gz" \
-  | tar -xz --no-same-owner --strip-components=1 -C "$bin" "atuin-${musl}/atuin"
-curl -fsSL --retry 5 --retry-delay 3 "$gh/jesseduffield/lazygit/releases/download/v${LAZYGIT_VERSION}/lazygit_${LAZYGIT_VERSION}_linux_x86_64.tar.gz" \
-  | tar -xz --no-same-owner -C "$bin" lazygit
-curl -fsSL --retry 5 --retry-delay 3 "$gh/fastfetch-cli/fastfetch/releases/download/${FASTFETCH_VERSION}/fastfetch-linux-amd64.tar.gz" \
-  | tar -xz --no-same-owner --strip-components=2 -C /opt/fastfetch
+# dl <url> <dest-dir> <strip-components> [member]
+# Downloads to a file first, so a failed download stops the build with curl's own error.
+dl() {
+  f=/tmp/dl.tgz
+  curl -fSL --retry 10 --retry-all-errors --retry-delay 10 \
+    --connect-timeout 30 --max-time 300 -o "$f" "$1"
+  tar -xzf "$f" --no-same-owner --strip-components="$3" -C "$2" ${4:+"$4"}
+  rm -f "$f"
+}
+
+dl "$gh/starship/starship/releases/download/v${STARSHIP_VERSION}/starship-${musl}.tar.gz" "$bin" 0 starship
+dl "$gh/eza-community/eza/releases/download/v${EZA_VERSION}/eza_${musl}.tar.gz" "$bin" 0 ./eza
+dl "$gh/sharkdp/bat/releases/download/v${BAT_VERSION}/bat-v${BAT_VERSION}-${musl}.tar.gz" "$bin" 1 "bat-v${BAT_VERSION}-${musl}/bat"
+dl "$gh/sharkdp/fd/releases/download/v${FD_VERSION}/fd-v${FD_VERSION}-${musl}.tar.gz" "$bin" 1 "fd-v${FD_VERSION}-${musl}/fd"
+dl "$gh/ajeetdsouza/zoxide/releases/download/v${ZOXIDE_VERSION}/zoxide-${ZOXIDE_VERSION}-${musl}.tar.gz" "$bin" 0 zoxide
+dl "$gh/dandavison/delta/releases/download/${DELTA_VERSION}/delta-${DELTA_VERSION}-${musl}.tar.gz" "$bin" 1 "delta-${DELTA_VERSION}-${musl}/delta"
+dl "$gh/atuinsh/atuin/releases/download/v${ATUIN_VERSION}/atuin-${musl}.tar.gz" "$bin" 1 "atuin-${musl}/atuin"
+dl "$gh/jesseduffield/lazygit/releases/download/v${LAZYGIT_VERSION}/lazygit_${LAZYGIT_VERSION}_linux_x86_64.tar.gz" "$bin" 0 lazygit
+dl "$gh/fastfetch-cli/fastfetch/releases/download/${FASTFETCH_VERSION}/fastfetch-linux-amd64.tar.gz" /opt/fastfetch 2
 
 chmod 0755 "$bin"/*
 EOR
@@ -99,12 +100,12 @@ mkdir -p /out/bin /out/images/cplane /out/images/node
 echo "${KUBEVIRT_VERSION}" > /out/kubevirt-version
 
 # virtctl
-curl -fsSL --retry 5 --retry-delay 3 -o /out/bin/virtctl \
+curl -fsSL --retry 10 --retry-all-errors --retry-delay 10 --connect-timeout 30 -o /out/bin/virtctl \
   "$gh/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/virtctl-${KUBEVIRT_VERSION}-linux-amd64"
 chmod 0755 /out/bin/virtctl
 
 # KubeVirt operator, with 1 replica instead of 2.
-curl -fsSL --retry 5 --retry-delay 3 -o "$m/10-kubevirt-operator.yaml" \
+curl -fsSL --retry 10 --retry-all-errors --retry-delay 10 --connect-timeout 30 -o "$m/10-kubevirt-operator.yaml" \
   "$gh/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/kubevirt-operator.yaml"
 yq -i '(select(.kind == "Deployment" and .metadata.name == "virt-operator") | .spec.replicas) = 1' \
   "$m/10-kubevirt-operator.yaml"
@@ -112,14 +113,14 @@ yq -i '(select(.kind == "Deployment" and .metadata.name == "virt-operator") | .s
 # CDI (Containerized Data Importer): imports VM disk images into PVCs, using
 # K3s' default local-path StorageClass. The operator is pinned to the K3s
 # server, where its image is preloaded. 40-cdi-cr.yaml pins the rest of CDI.
-curl -fsSL --retry 5 --retry-delay 3 -o "$m/30-cdi-operator.yaml" \
+curl -fsSL --retry 10 --retry-all-errors --retry-delay 10 --connect-timeout 30 -o "$m/30-cdi-operator.yaml" \
   "$gh/kubevirt/containerized-data-importer/releases/download/${CDI_VERSION}/cdi-operator.yaml"
 yq -i '(select(.kind == "Deployment" and .metadata.name == "cdi-operator") | .spec.template.spec.nodeSelector["node-role.kubernetes.io/control-plane"]) = "true"' \
   "$m/30-cdi-operator.yaml"
 
 # KubeVirt Manager web UI: pinned to the K3s server, Service on a fixed NodePort
 # so the playground manifest can open it as a tab.
-curl -fsSL --retry 5 --retry-delay 3 -o "$m/50-kubevirt-manager.yaml" \
+curl -fsSL --retry 10 --retry-all-errors --retry-delay 10 --connect-timeout 30 -o "$m/50-kubevirt-manager.yaml" \
   "https://raw.githubusercontent.com/kubevirt-manager/kubevirt-manager/v${KUBEVIRT_MANAGER_VERSION}/kubernetes/bundled.yaml"
 yq -i '(select(.kind == "Deployment" and .metadata.name == "kubevirt-manager") | .spec.template.spec.nodeSelector["node-role.kubernetes.io/control-plane"]) = "true"
   | (select(.kind == "Service" and .metadata.name == "kubevirt-manager") | .spec.type) = "NodePort"
