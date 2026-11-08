@@ -1,0 +1,24 @@
+# Build context for the kubevirt rootfs images.
+# Allowlist: ignore everything, then add back only what the Dockerfile uses.
+*
+!Dockerfile
+!build
+!dev-machine
+!kubevirt
+!terminal
+!vnc
+
+# Packer output, in case a build is run from inside the repo.
+# dev-machine/packer/ is copied into the image, so keep disks out of it.
+**/output-*
+**/packer_cache
+**/*.qcow2
+**/*.img
+**/*.iso
+**/*.raw
+**/crash.log
+
+# Editor and OS files
+**/.DS_Store
+**/*.swp
+**/*~
